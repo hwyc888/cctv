@@ -405,8 +405,8 @@ func (m *Manager) RetryTask(id string) error {
 	err := m.store.Update(func(state *model.State) error {
 		for i := range state.Downloads {
 			if state.Downloads[i].ID == id {
-				if state.Downloads[i].Status != "failed" && state.Downloads[i].Status != "cancelled" {
-					return errors.New("只有失败或已取消的任务可以重试")
+				if state.Downloads[i].Status != "failed" && state.Downloads[i].Status != "cancelled" && state.Downloads[i].Status != "completed" {
+					return errors.New("只有失败、已取消或已完成的任务可以重试")
 				}
 				if state.Settings.DownloadsPaused {
 					state.Downloads[i].Status = "paused"
@@ -418,6 +418,7 @@ func (m *Manager) RetryTask(id string) error {
 				state.Downloads[i].Speed = ""
 				state.Downloads[i].VideoQuality = ""
 				state.Downloads[i].CompletedAt = ""
+				recountDownloaded(state, state.Downloads[i].SubscriptionID)
 				return nil
 			}
 		}
@@ -621,7 +622,7 @@ func (m *Manager) runTask(ctx context.Context, id string) {
 		m.finishFromError(id, err)
 		return
 	}
-	if err := os.Rename(tempPath, finalPath); err != nil {
+	if err := replaceDownloadedFile(tempPath, finalPath); err != nil {
 		m.failTask(id, fmt.Errorf("保存文件: %w", err))
 		return
 	}
