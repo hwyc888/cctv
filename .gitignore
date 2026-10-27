@@ -42,3 +42,5 @@ yarn-error.log*
 /downloads/
 /bin/
 *.part
+/cmd/cctv-sub/webdist/
+/release/

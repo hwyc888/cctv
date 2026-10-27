@@ -49,7 +49,15 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	manager.Start(ctx)
-	httpServer := &http.Server{Addr: *addr, Handler: server.New(stateStore, client, manager, logger), ReadHeaderTimeout: 10 * time.Second}
+	apiHandler := server.New(stateStore, client, manager, logger)
+	handler := apiHandler
+	if uiHandler := webHandler(); uiHandler != nil {
+		router := http.NewServeMux()
+		router.Handle("/api/", apiHandler)
+		router.Handle("/", uiHandler)
+		handler = router
+	}
+	httpServer := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		logger.Info("CCTV subscription API started", "url", "http://"+*addr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

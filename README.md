@@ -359,3 +359,44 @@ docker compose ps
 ```
 
 更新前建议先备份 `data/`。视频保存在宿主机挂载目录中，不会因为重新构建容器而删除。
+
+## Windows / Debian 单文件运行版
+
+在 [GitHub Actions 构建页面](https://github.com/hwyc888/cctv/actions/workflows/build-binaries.yml) 选择最新一次成功的 `Build Windows and Debian binaries`，下载 `cctv-sub-windows-debian` 构建产物 ZIP，解压后可获得：
+
+- `cctv-sub-windows-amd64.zip`：Windows 10/11（x64），内含 `cctv-sub.exe`。
+- `cctv-sub-linux-amd64.tar.gz`：Debian / Ubuntu x86-64 可执行程序。
+- `cctv-sub-linux-arm64.tar.gz`：Debian / Ubuntu ARM64 可执行程序。
+- `cctv-sub_..._amd64.deb` 和 `cctv-sub_..._arm64.deb`：Debian 安装包。
+
+这几个可执行文件使用 `npm run build:standalone` 构建 Web 管理界面，再通过 `go build -tags standalone` 将其**嵌入 Go 程序**。运行时不需要 Node.js、npm 或额外的 Web 服务，API 与浏览器管理界面共用一个地址。
+
+**Windows：** 先安装 [FFmpeg](https://ffmpeg.org/download.html) 并将 `ffmpeg.exe` 所在目录加入 PATH。解压后从 PowerShell 进入该目录，执行：
+
+```powershell
+.\cctv-sub.exe -addr 127.0.0.1:8080 -data .\data -downloads .\downloads
+```
+
+然后打开 http://127.0.0.1:8080 。
+
+**Debian / Ubuntu：** 推荐用安装包，自动安装系统依赖 FFmpeg：
+
+```bash
+sudo apt install ./cctv-sub_1.0.0+git*_amd64.deb
+mkdir -p "$HOME/cctv-data" "$HOME/Videos/CCTV"
+cctv-sub -addr 127.0.0.1:8080 -data "$HOME/cctv-data" -downloads "$HOME/Videos/CCTV"
+```
+
+ARM64 设备请将安装包名称中的 `amd64` 换成 `arm64`。然后在浏览器打开 http://127.0.0.1:8080 。如果使用 `.tar.gz` 解压的二进制，请先运行 `sudo apt install ffmpeg ca-certificates`，再运行 `./cctv-sub`。
+
+两种系统都默认只监听本机；需要局域网访问时可改为 `-addr 0.0.0.0:8080`，但这会使服务对局域网开放，建议只在可信网络使用。数据库和视频存放在启动时指定的目录中，更新程序不会主动删除这些数据。
+
+也可以在源码根目录自行构建：
+
+```bash
+npm ci
+npm run build:standalone
+go build -tags standalone -o cctv-sub ./cmd/cctv-sub
+```
+
+该命令为当前操作系统生成二进制。原先的 `go build ./cmd/cctv-sub` 仍只构建独立 API 后端，Docker Compose 部署方式不变。
