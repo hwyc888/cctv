@@ -1,0 +1,39 @@
+name: Verify real CCTV video decryption
+
+on:
+  push:
+    paths:
+      - internal/service/video_visual_integration_test.go
+      - .github/workflows/verify-video.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Inspect FFmpeg availability
+        run: |
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+      - name: Decode and verify real CCTV HLS video frames
+        env:
+          CCTV_VISUAL_INTEGRATION: "1"
+          CCTV_VISUAL_OUTPUT: /tmp/cctv-video-check
+        run: go test ./internal/service -run '^TestLiveVideoVisualDecode$' -count=1 -v -timeout 8m
+      - name: Upload actual decoded frame
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-cctv-decode-check
+          path: /tmp/cctv-video-check/*.png
+          if-no-files-found: ignore
+          retention-days: 1
