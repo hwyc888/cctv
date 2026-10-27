@@ -1,0 +1,41 @@
+name: cctv-sub
+
+services:
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    command: ["-addr", "0.0.0.0:8080", "-data", "/data", "-database", "/data/cctv-sub.db", "-downloads", "/downloads"]
+    environment:
+      CCTV_PLAYER_CACHE: /data/cctv-player-cache
+    volumes:
+      - ./data:/data
+      - /vol2/1000/电影电视:/downloads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        NEXT_PUBLIC_API_URL: ""
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  gateway:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+      - api
+    ports:
+      - "3010:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
