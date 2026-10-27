@@ -10,13 +10,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
 	"strconv"
-	"strings"
 	"time"
 
 	"cctv-sub/internal/cctv"
+	"cctv-sub/internal/ffmpeg"
 	"cctv-sub/internal/model"
 	"cctv-sub/internal/service"
 	"cctv-sub/internal/store"
@@ -96,28 +94,12 @@ func isAllowedOrigin(origin, requestHost string) bool {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	_, ffmpegErr := configuredExecutable("CCTV_FFMPEG_PATH", "ffmpeg")
+	_, ffmpegErr := ffmpeg.Find()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	databaseOK := s.store.Ping(ctx) == nil
 	ready := ffmpegErr == nil && databaseOK
 	writeJSON(w, http.StatusOK, map[string]any{"ok": ready, "ffmpeg": ffmpegErr == nil, "playerDecryptor": true, "decryptorRuntime": "go-wasm", "database": databaseOK, "time": time.Now().Format(time.RFC3339)})
-}
-
-func configuredExecutable(environmentName string, names ...string) (string, error) {
-	if configured := strings.TrimSpace(os.Getenv(environmentName)); configured != "" {
-		info, err := os.Stat(configured)
-		if err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-			return configured, nil
-		}
-		return "", fmt.Errorf("%s is not executable", environmentName)
-	}
-	for _, name := range names {
-		if executable, err := exec.LookPath(name); err == nil {
-			return executable, nil
-		}
-	}
-	return "", exec.ErrNotFound
 }
 
 func (s *Server) state(w http.ResponseWriter, _ *http.Request) {

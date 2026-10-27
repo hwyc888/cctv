@@ -25,6 +25,7 @@ import (
 
 	"cctv-sub/internal/cctv"
 	"cctv-sub/internal/cctvwasm"
+	"cctv-sub/internal/ffmpeg"
 	"cctv-sub/internal/model"
 	"cctv-sub/internal/store"
 )
@@ -830,9 +831,9 @@ func (m *Manager) loadCCTVWorkerSource(ctx context.Context) ([]byte, error) {
 }
 
 func remuxMPEGTS(ctx context.Context, input, output string) error {
-	ffmpegPath, err := executablePath("CCTV_FFMPEG_PATH", "ffmpeg")
+	ffmpegPath, err := ffmpeg.Find()
 	if err != nil {
-		return errors.New("缺少 FFmpeg，无法无损封装 MP4")
+		return fmt.Errorf("未找到 FFmpeg，无法封装 MP4；请将 ffmpeg.exe 放到程序同目录或设置 CCTV_FFMPEG_PATH: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, ffmpegPath,
 		"-nostdin", "-hide_banner", "-v", "error", "-y",
@@ -851,9 +852,9 @@ func remuxMPEGTS(ctx context.Context, input, output string) error {
 }
 
 func verifyDecodedVideo(ctx context.Context, filename string) error {
-	ffmpegPath, err := executablePath("CCTV_FFMPEG_PATH", "ffmpeg")
+	ffmpegPath, err := ffmpeg.Find()
 	if err != nil {
-		return errors.New("缺少 FFmpeg，无法验证下载视频")
+		return fmt.Errorf("未找到 FFmpeg，无法验证下载视频；请将 ffmpeg.exe 放到程序同目录或设置 CCTV_FFMPEG_PATH: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-v", "error", "-xerror", "-i", filename, "-map", "0:v:0", "-f", "null", "-")
 	output, err := cmd.CombinedOutput()
@@ -868,22 +869,6 @@ func verifyDecodedVideo(ctx context.Context, filename string) error {
 		return fmt.Errorf("最高画质视频完整性验证失败: %s", message)
 	}
 	return nil
-}
-
-func executablePath(environmentName string, names ...string) (string, error) {
-	if configured := strings.TrimSpace(os.Getenv(environmentName)); configured != "" {
-		info, err := os.Stat(configured)
-		if err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-			return configured, nil
-		}
-		return "", fmt.Errorf("%s 指向的程序不可执行", environmentName)
-	}
-	for _, name := range names {
-		if detected, err := exec.LookPath(name); err == nil {
-			return detected, nil
-		}
-	}
-	return "", exec.ErrNotFound
 }
 
 func (m *Manager) finishFromError(id string, err error) {

@@ -164,7 +164,7 @@ go run ./cmd/cctv-sub \
 | `NEXT_PUBLIC_API_URL` | 管理界面的 API 基础地址；生产 Docker 部署留空并通过 Nginx 使用同源 `/api` |
 | `CCTV_PLAYER_CACHE` | 央视播放器 Worker/WASM 缓存目录 |
 | `CCTV_WASM_SOURCE_PATH` | 可选，本地 `cctv.worker.js` 路径；不设置时自动从央视播放器地址下载并缓存 |
-| `CCTV_FFMPEG_PATH` | 可选，指定 FFmpeg 可执行文件的绝对路径 |
+| `CCTV_FFMPEG_PATH` | 可选，指定 FFmpeg 可执行文件的绝对路径，优先级高于自动查找 |
 | `CCTV_FFPROBE_PATH` | 仅完整集成测试使用，可选指定 ffprobe 路径 |
 
 Docker 部署默认将播放器缓存保存到 `/data/cctv-player-cache`，与 SQLite 数据一起持久化。
@@ -360,6 +360,12 @@ docker compose ps
 ```
 
 更新前建议先备份 `data/`。视频保存在宿主机挂载目录中，不会因为重新构建容器而删除。
+
+## 自动查找 FFmpeg
+
+新版程序依次从指定的 `CCTV_FFMPEG_PATH` 路径、**程序所在文件夹**和系统 `PATH` 查找 FFmpeg。Windows 请将真正的 `ffmpeg.exe`（通常位于 FFmpeg 压缩包解压后的 `bin` 文件夹内）与 `cctv-sub.exe` 放在同一个文件夹。Linux 可将具有执行权限的 `ffmpeg` 放在 `cctv-sub` 同目录，或直接通过包管理器安装。
+
+Windows 验证方式：在 EXE 目录的 PowerShell 中运行 `./ffmpeg.exe -version`，然后启动 `./cctv-sub.exe`，查看 `http://127.0.0.1:8080/api/health` 是否返回 `"ffmpeg":true`。实际下载与健康检查共用同一套 FFmpeg 搜索逻辑。若设置了 `CCTV_FFMPEG_PATH`，请确保路径正确；错误的环境变量路径不会自动回退。
 
 ## Windows / Debian 单文件运行版
 
