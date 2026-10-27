@@ -63,6 +63,7 @@ type DownloadTask struct {
 	Progress       float64 `json:"progress"`
 	Speed          string  `json:"speed,omitempty"`
 	FilePath       string  `json:"filePath,omitempty"`
+	VideoQuality   string  `json:"videoQuality,omitempty"`
 	Error          string  `json:"error,omitempty"`
 	CreatedAt      string  `json:"createdAt"`
 	StartedAt      string  `json:"startedAt,omitempty"`

@@ -75,6 +75,7 @@ type DownloadTask = {
   progress: number;
   speed?: string;
   filePath?: string;
+  videoQuality?: string;
   error?: string;
   createdAt: string;
   completedAt?: string;
@@ -406,7 +407,7 @@ export default function Home() {
           <div className="task-toolbar"><div className="filter-tabs">{[["all","全部"],["downloading","下载中"],["queued","等待中"],["paused","已暂停"],["completed","已完成"],["failed","失败"]].map(([key,label]) => <button className={taskFilter === key ? "active" : ""} key={key} onClick={() => setTaskFilter(key)}>{label}</button>)}</div><div className="toolbar-actions"><button className={`bulk-control ${state.settings.downloadsPaused ? "resume" : ""}`} disabled={bulkBusy} onClick={toggleAllDownloads}>{bulkBusy ? <LoaderCircle className="spin" size={15} /> : state.settings.downloadsPaused ? <Play size={15} /> : <Pause size={15} />}{state.settings.downloadsPaused ? "全部恢复" : "全部暂停"}</button><button className="ghost-small" onClick={() => loadState()}><RefreshCw size={15} />刷新</button></div></div>
           {visibleTasks.length ? <div className="task-list">{visibleTasks.map((task) => <article className="task-row" key={task.id}><div className="task-thumb"><img src={task.poster} alt="" />{task.status === "completed" && <span><Check size={14} /></span>}</div><div className="task-main"><div className="task-heading"><div><h3>{task.title}</h3><p>{task.seriesTitle}</p></div><span className={`task-status ${task.status}`}>{task.status === "downloading" && <LoaderCircle className="spin" size={13} />}{statusText(task.status)}</span></div>
             {(task.status === "downloading" || task.status === "queued" || task.status === "paused") && <div className="task-progress"><div className="progress-track"><span style={{ width: `${task.progress}%` }} /></div><div><b>{task.status === "queued" ? "等待可用下载槽" : task.status === "paused" ? "已暂停，恢复后重新开始" : `${Math.round(task.progress)}%`}</b><span>{task.speed || (task.status === "queued" || task.status === "paused" ? "" : "正在连接资源…")}</span></div></div>}
-            {task.status === "failed" && <div className="task-error">{task.error}</div>}{task.status === "completed" && <div className="task-file"><FolderOpen size={14} /><span title={task.filePath}>{task.filePath}</span></div>}
+            {task.status === "failed" && <div className="task-error">{task.error}</div>}{task.status === "completed" && <div className="task-file"><FolderOpen size={14} /><span title={task.filePath}>{task.filePath}</span>{task.videoQuality && <b title="实际保存的视频画质"> · {task.videoQuality}</b>}</div>}
           </div><div className="task-actions">{(task.status === "queued" || task.status === "downloading" || task.status === "paused") && <button title="取消任务" onClick={() => taskAction(task, "cancel")}><X size={17} /></button>}{(task.status === "failed" || task.status === "cancelled") && <button className="retry" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重试</button>}</div></article>)}</div> : <div className="empty-state large"><HardDriveDownload size={32} /><h3>这里暂时没有任务</h3><p>新增订阅或等待剧集更新，下载任务会显示在这里。</p></div>}
         </section>}
 

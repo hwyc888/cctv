@@ -416,6 +416,7 @@ func (m *Manager) RetryTask(id string) error {
 				state.Downloads[i].Progress = 0
 				state.Downloads[i].Error = ""
 				state.Downloads[i].Speed = ""
+				state.Downloads[i].VideoQuality = ""
 				state.Downloads[i].CompletedAt = ""
 				return nil
 			}
@@ -641,22 +642,23 @@ func (m *Manager) runTask(ctx context.Context, id string) {
 }
 
 func (m *Manager) downloadHLS(ctx context.Context, taskID string, playlistURLs []string, output string) error {
-	var playlist mediaPlaylist
-	var err error
-	for _, playlistURL := range playlistURLs {
-		playlist, err = loadMediaPlaylist(ctx, m.cctv.HTTPClient(), playlistURL, 0)
-		if err == nil && len(playlist.Segments) > 0 {
-			break
-		}
-	}
+	selected, err := m.choosePlayableHLS(ctx, playlistURLs)
 	if err != nil {
 		return err
 	}
-	if len(playlist.Segments) == 0 {
-		return errors.New("播放列表中没有视频分片")
-	}
-	if err := m.runGoPlayerDecryptor(ctx, taskID, playlist.Segments, output); err != nil {
+	_ = m.updateTask(taskID, func(task *model.DownloadTask) {
+		task.VideoQuality = selected.quality
+		task.Speed = "已检测可播放的视频源，准备下载 " + selected.quality
+	})
+	if err := m.runHLSMedia(ctx, taskID, selected.playlist.Segments, output, selected.useWASM); err != nil {
 		return err
+	}
+	_ = m.updateTask(taskID, func(task *model.DownloadTask) {
+		task.Progress = 96
+		task.Speed = "正在确认视频画面可解码"
+	})
+	if err := checkVideoFilePlayable(ctx, output); err != nil {
+		return fmt.Errorf("MP4 画面验证失败，文件未标记为完成: %w", err)
 	}
 	if m.store.Snapshot().Settings.VerifyVideoAfterDownload {
 		_ = m.updateTask(taskID, func(task *model.DownloadTask) {
@@ -672,10 +674,14 @@ func (m *Manager) downloadHLS(ctx context.Context, taskID string, playlistURLs [
 	return nil
 }
 
-func (m *Manager) runGoPlayerDecryptor(ctx context.Context, taskID string, segments []hlsSegment, output string) error {
-	engine, err := m.cctvDecryptorEngine(ctx)
-	if err != nil {
-		return err
+func (m *Manager) runHLSMedia(ctx context.Context, taskID string, segments []hlsSegment, output string, decryptWithWASM bool) error {
+	var engine *cctvwasm.Engine
+	if decryptWithWASM {
+		var err error
+		engine, err = m.cctvDecryptorEngine(ctx)
+		if err != nil {
+			return err
+		}
 	}
 
 	clearFile, err := os.CreateTemp(filepath.Dir(output), ".cctv-clear-*.ts")
@@ -717,10 +723,14 @@ func (m *Manager) runGoPlayerDecryptor(ctx context.Context, taskID string, segme
 				return fmt.Errorf("解密 HLS 分片 %d/%d: %w", index+1, len(segments), err)
 			}
 		}
-		mediaTagID := fmt.Sprintf("%d-%d", time.Now().UnixMilli(), index)
-		clear, err := engine.DecryptMPEGTS(ctx, data, mediaTagID, cctvPlayerOrigin)
-		if err != nil {
-			return fmt.Errorf("纯 Go 解密最高画质分片 %d/%d: %w", index+1, len(segments), err)
+		clear := data
+		var err error
+		if engine != nil {
+			mediaTagID := fmt.Sprintf("%d-%d", time.Now().UnixMilli(), index)
+			clear, err = engine.DecryptMPEGTS(ctx, data, mediaTagID, cctvPlayerOrigin)
+			if err != nil {
+				return fmt.Errorf("纯 Go 解密视频分片 %d/%d: %w", index+1, len(segments), err)
+			}
 		}
 		if _, err := clearFile.Write(clear); err != nil {
 			return fmt.Errorf("写入解密分片 %d/%d: %w", index+1, len(segments), err)
@@ -733,7 +743,11 @@ func (m *Manager) runGoPlayerDecryptor(ctx context.Context, taskID string, segme
 		progress := 2 + float64(index+1)/float64(len(segments))*90
 		_ = m.updateTask(taskID, func(task *model.DownloadTask) {
 			task.Progress = progress
-			task.Speed = fmt.Sprintf("%d 路分片并发 · 纯 Go 解密 %d/%d · %s", parallelism, index+1, len(segments), speed)
+			method := "直接下载可播放画质"
+			if decryptWithWASM {
+				method = "纯 Go 解密视频"
+			}
+			task.Speed = fmt.Sprintf("%d 路并发 · %s %d/%d · %s", parallelism, method, index+1, len(segments), speed)
 		})
 		return nil
 	}); err != nil {
