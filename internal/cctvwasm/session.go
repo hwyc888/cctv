@@ -10,7 +10,8 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
-var vodFunctions = []string{"ta", "sa", "ra", "qa", "pa", "oa", "na", "ma"}
+var legacyVODFunctions = []string{"ta", "sa", "ra", "qa", "pa", "oa", "na", "ma"}
+var modernVODFunctions = []string{"va", "ua", "ta", "sa", "ra", "qa", "pa", "oa"}
 
 // Session is a fresh official CCTV decryption state. CCTV's player requires a
 // new state for each TS segment; reusing it can corrupt decoded frames.
@@ -51,9 +52,9 @@ func (e *Engine) NewSession(ctx context.Context, mediaTagID, activeURL string) (
 	memory := environment.Memory()
 	// Keep allocations above the relocated lookup table. The generated loader
 	// reserves this range before the exported allocator is used.
-	nextDynamic := lookupTableBase + uint32(len(e.table))
+	nextDynamic := e.layout.lookupTableBase + uint32(len(e.table))
 	nextDynamic = (nextDynamic + 15) &^ 15
-	if err := writeUint32(memory, dynamicTopPointer, nextDynamic); err != nil {
+	if err := writeUint32(memory, e.layout.dynamicTopPointer, nextDynamic); err != nil {
 		_ = environment.Close(ctx)
 		return nil, err
 	}
@@ -64,33 +65,33 @@ func (e *Engine) NewSession(ctx context.Context, mediaTagID, activeURL string) (
 		return nil, fmt.Errorf("实例化央视 WASM: %w", err)
 	}
 	session := &Session{module: module, environment: environment, engine: e, host: host, ctx: ctx, mediaTagID: mediaTagID}
-	if !memory.Write(lookupTableBase, e.table) {
+	if !memory.Write(e.layout.lookupTableBase, e.table) {
 		_ = module.Close(ctx)
 		_ = environment.Close(ctx)
 		return nil, fmt.Errorf("央视 WASM 查找表写入越界: %d", len(e.table))
 	}
 	for _, offset := range e.relocations {
-		pointer := lookupTableBase + offset
+		pointer := e.layout.lookupTableBase + offset
 		value, ok := memory.ReadUint32Le(pointer)
-		if !ok || !memory.WriteUint32Le(pointer, value+lookupTableBase) {
+		if !ok || !memory.WriteUint32Le(pointer, value+e.layout.lookupTableBase) {
 			_ = module.Close(ctx)
 			_ = environment.Close(ctx)
 			return nil, fmt.Errorf("央视 WASM 重定位越界: %d", offset)
 		}
 	}
-	if _, err := module.ExportedFunction("La").Call(ctx); err != nil {
+	if _, err := module.ExportedFunction(e.functionName("La", "Na")).Call(ctx); err != nil {
 		_ = module.Close(ctx)
 		_ = environment.Close(ctx)
 		return nil, fmt.Errorf("初始化央视 WASM 运行库: %w", err)
 	}
-	if _, err := session.callString("aa", mediaTagID, true); err != nil {
+	if _, err := session.callString(e.functionName("aa", "ca"), mediaTagID, true); err != nil {
 		_ = module.Close(ctx)
 		_ = environment.Close(ctx)
 		return nil, fmt.Errorf("初始化央视播放器会话: %w", err)
 	}
 	// The generated loader invokes onRuntimeInitialized (where the worker
 	// initializes the player) before it falls through to callMain.
-	if err := runModuleMain(ctx, module); err != nil {
+	if err := runModuleMain(ctx, module, e.layout.modern); err != nil {
 		_ = module.Close(ctx)
 		_ = environment.Close(ctx)
 		return nil, fmt.Errorf("启动央视 WASM 运行库: %w", err)
@@ -104,17 +105,21 @@ func (e *Engine) NewSession(ctx context.Context, mediaTagID, activeURL string) (
 	return session, nil
 }
 
-func runModuleMain(ctx context.Context, module api.Module) error {
+func runModuleMain(ctx context.Context, module api.Module, modern bool) error {
+	stackAlloc, emtStackSave, mainFunction := "Ma", "Ka", "Ea"
+	if modern {
+		stackAlloc, emtStackSave, mainFunction = "Oa", "Ma", "Ga"
+	}
 	// Emscripten's generated run() invokes main with a single program-name
 	// argument after global constructors. Besides initializing the library,
 	// its two stackAlloc calls are observable by CCTV's address-dependent VOD
 	// transform and therefore must be reproduced exactly.
-	argumentVectorResult, err := module.ExportedFunction("Ma").Call(ctx, 8)
+	argumentVectorResult, err := module.ExportedFunction(stackAlloc).Call(ctx, 8)
 	if err != nil || len(argumentVectorResult) == 0 {
 		return fmt.Errorf("分配参数向量: %w", err)
 	}
 	const programName = "./this.program"
-	programResult, err := module.ExportedFunction("Ma").Call(ctx, uint64(len(programName)+1))
+	programResult, err := module.ExportedFunction(stackAlloc).Call(ctx, uint64(len(programName)+1))
 	if err != nil || len(programResult) == 0 {
 		return fmt.Errorf("分配程序名称: %w", err)
 	}
@@ -126,10 +131,10 @@ func runModuleMain(ctx context.Context, module api.Module) error {
 		!memory.WriteUint32Le(argumentVector+4, 0) {
 		return fmt.Errorf("写入程序参数越界")
 	}
-	if _, err := module.ExportedFunction("Ka").Call(ctx); err != nil {
+	if _, err := module.ExportedFunction(emtStackSave).Call(ctx); err != nil {
 		return fmt.Errorf("保存央视 EMT 栈: %w", err)
 	}
-	if _, err := module.ExportedFunction("Ea").Call(ctx, 1, uint64(argumentVector)); err != nil {
+	if _, err := module.ExportedFunction(mainFunction).Call(ctx, 1, uint64(argumentVector)); err != nil {
 		return fmt.Errorf("执行央视 WASM main: %w", err)
 	}
 	return nil
@@ -141,7 +146,7 @@ func (s *Session) completePendingFetches() error {
 		// Emscripten places that response in WASM memory before invoking the
 		// registered error callback on the next event-loop turn.
 		const responseBody = "not found"
-		results, err := s.module.ExportedFunction("Fa").Call(s.ctx, uint64(len(responseBody)))
+		results, err := s.module.ExportedFunction(s.engine.functionName("Fa", "Ha")).Call(s.ctx, uint64(len(responseBody)))
 		if err != nil || len(results) == 0 || results[0] == 0 {
 			return fmt.Errorf("分配辅助响应: %w", err)
 		}
@@ -162,7 +167,7 @@ func (s *Session) completePendingFetches() error {
 			return fmt.Errorf("读取辅助请求回调越界")
 		}
 		if callback != 0 {
-			if _, err := s.module.ExportedFunction("Ia").Call(s.ctx, uint64(callback), uint64(fetchPointer)); err != nil {
+			if _, err := s.module.ExportedFunction(s.engine.functionName("Ia", "Ka")).Call(s.ctx, uint64(callback), uint64(fetchPointer)); err != nil {
 				return fmt.Errorf("执行辅助请求回调: %w", err)
 			}
 		}
@@ -199,7 +204,7 @@ func (s *Session) callString(functionName, value string, extended bool) (uint32,
 }
 
 func (s *Session) malloc(size uint32) (uint32, error) {
-	results, err := s.module.ExportedFunction("Da").Call(s.ctx, uint64(size))
+	results, err := s.module.ExportedFunction(s.engine.functionName("Da", "Fa")).Call(s.ctx, uint64(size))
 	if err != nil {
 		return 0, err
 	}
@@ -211,14 +216,14 @@ func (s *Session) malloc(size uint32) (uint32, error) {
 
 func (s *Session) free(pointer uint32) {
 	if pointer != 0 {
-		_, _ = s.module.ExportedFunction("Ca").Call(s.ctx, uint64(pointer))
+		_, _ = s.module.ExportedFunction(s.engine.functionName("Ca", "Ea")).Call(s.ctx, uint64(pointer))
 	}
 }
 
 // Update mirrors CNTV_UpdatePlayer and selects the per-frame VOD transform
 // order used by the official worker.
 func (s *Session) Update() error {
-	value, err := s.callString("ca", s.mediaTagID, true)
+	value, err := s.callString(s.engine.functionName("ca", "ea"), s.mediaTagID, true)
 	if err != nil {
 		return err
 	}
@@ -264,6 +269,10 @@ func (s *Session) DecryptNAL(argument string, input []byte) ([]byte, error) {
 		uint64(len(input)),
 		uint64(len(activeURL)),
 	}
+	vodFunctions := legacyVODFunctions
+	if s.engine.layout.modern {
+		vodFunctions = modernVODFunctions
+	}
 	for index, digit := range s.vmpTag {
 		if index >= len(vodFunctions) || digit < '0' || digit > '6' {
 			continue
@@ -273,7 +282,7 @@ func (s *Session) DecryptNAL(argument string, input []byte) ([]byte, error) {
 			return nil, fmt.Errorf("央视 VOD 解密阶段 %d: %w", index, err)
 		}
 	}
-	results, err := s.module.ExportedFunction("ua").Call(s.ctx, parameters...)
+	results, err := s.module.ExportedFunction(s.engine.functionName("ua", "wa")).Call(s.ctx, parameters...)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("央视 VOD 最终解密（vmpTag=%q）: %w", s.vmpTag, err)

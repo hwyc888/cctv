@@ -30,12 +30,39 @@ const (
 	memoryExtend      = uint32(2048)
 )
 
-var importedGlobalValues = map[string]uint32{
-	"__table_base": 0,
-	"a":            tempDoublePointer,
-	"b":            dynamicTopPointer,
-	"c":            dynamicBase,
-	"d":            lookupTableBase,
+type moduleLayout struct {
+	modern            bool
+	dynamicTopPointer uint32
+	lookupTableBase   uint32
+	globals           map[string]uint32
+}
+
+var legacyLayout = moduleLayout{
+	dynamicTopPointer: dynamicTopPointer,
+	lookupTableBase:   lookupTableBase,
+	globals: map[string]uint32{
+		"__table_base": 0,
+		"a":            tempDoublePointer,
+		"b":            dynamicTopPointer,
+		"c":            dynamicBase,
+		"d":            lookupTableBase,
+	},
+}
+
+// The official CCTV worker build dated 2026-08-24 changed the Emscripten
+// minifier names and grew its static lookup table. The WASM and loader must
+// use the same addresses; old cached modules retain the legacy layout.
+var modernLayout = moduleLayout{
+	modern:            true,
+	dynamicTopPointer: 40992,
+	lookupTableBase:   6332480,
+	globals: map[string]uint32{
+		"__table_base": 0,
+		"a":            41008,
+		"b":            40992,
+		"c":            5283904,
+		"d":            6332480,
+	},
 }
 
 type sessionContextKey struct{}
@@ -65,6 +92,7 @@ type emvalType struct {
 // Sessions are safe to use from multiple goroutines, but are serialized because
 // each one must instantiate the official module under its fixed "env" name.
 type Engine struct {
+	layout              moduleLayout
 	runtime             wazero.Runtime
 	compiled            wazero.CompiledModule
 	compiledEnvironment wazero.CompiledModule
@@ -77,15 +105,19 @@ type Engine struct {
 // NewEngine extracts CCTV's embedded WebAssembly module and its lookup table
 // from cctv.worker.js, then compiles them for direct execution in Go.
 func NewEngine(ctx context.Context, workerSource []byte) (*Engine, error) {
+	layout := legacyLayout
+	if bytes.Contains(workerSource, []byte(`var M="data:application/octet-stream;base64,`)) {
+		layout = modernLayout
+	}
 	wasmBytes, err := extractWASM(workerSource)
 	if err != nil {
 		return nil, err
 	}
-	lookupTable, err := extractLookupTable(workerSource)
+	lookupTable, err := extractLookupTable(workerSource, layout)
 	if err != nil {
 		return nil, err
 	}
-	relocations, err := extractLookupRelocations(workerSource, len(lookupTable))
+	relocations, err := extractLookupRelocations(workerSource, len(lookupTable), layout.modern)
 	if err != nil {
 		return nil, err
 	}
@@ -94,14 +126,14 @@ func NewEngine(ctx context.Context, workerSource []byte) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("解析央视 WASM: %w", err)
 	}
-	environmentWASM, functionImports, err := buildEnvironmentModule(decoded)
+	environmentWASM, functionImports, err := buildEnvironmentModule(decoded, layout.globals)
 	if err != nil {
 		return nil, err
 	}
 
 	runtimeConfig := wazero.NewRuntimeConfigCompiler().WithCloseOnContextDone(true)
 	runtime := wazero.NewRuntimeWithConfig(ctx, runtimeConfig)
-	engine := &Engine{runtime: runtime, table: lookupTable, relocations: relocations}
+	engine := &Engine{runtime: runtime, layout: layout, table: lookupTable, relocations: relocations}
 	if err := engine.instantiateHostModule(ctx, decoded, functionImports); err != nil {
 		_ = runtime.Close(ctx)
 		return nil, err
@@ -119,7 +151,7 @@ func NewEngine(ctx context.Context, workerSource []byte) (*Engine, error) {
 	return engine, nil
 }
 
-func buildEnvironmentModule(module *wabinwasm.Module) ([]byte, []*wabinwasm.Import, error) {
+func buildEnvironmentModule(module *wabinwasm.Module, globals map[string]uint32) ([]byte, []*wabinwasm.Import, error) {
 	environment := &wabinwasm.Module{TypeSection: module.TypeSection}
 	functionImports := make([]*wabinwasm.Import, 0, 50)
 	functionIndex := uint32(0)
@@ -139,7 +171,7 @@ func buildEnvironmentModule(module *wabinwasm.Module) ([]byte, []*wabinwasm.Impo
 			})
 			functionIndex++
 		case wabinwasm.ExternTypeGlobal:
-			value, ok := importedGlobalValues[imp.Name]
+			value, ok := globals[imp.Name]
 			if !ok {
 				return nil, nil, fmt.Errorf("央视 WASM 出现未知全局变量 %q", imp.Name)
 			}
@@ -175,17 +207,20 @@ func buildEnvironmentModule(module *wabinwasm.Module) ([]byte, []*wabinwasm.Impo
 }
 
 func extractWASM(source []byte) ([]byte, error) {
-	const variableMarker = "var wasmBinaryFile="
 	const base64Marker = "base64,"
-	start := bytes.Index(source, []byte(variableMarker))
+	start := bytes.Index(source, []byte("var wasmBinaryFile="))
 	if start < 0 {
-		return nil, errors.New("央视模块中没有 wasmBinaryFile")
+		// CCTV's August 2026 worker minifies the embedded WASM URL to M.
+		start = bytes.Index(source, []byte(`var M="data:application/octet-stream;base64,`))
+		if start < 0 {
+			return nil, errors.New("央视模块不包含已支持的内嵌 WASM，可能需要更新解密器")
+		}
 	}
-	start += bytes.Index(source[start:], []byte(base64Marker))
-	if start < len(variableMarker) {
+	relative := bytes.Index(source[start:], []byte(base64Marker))
+	if relative < 0 {
 		return nil, errors.New("央视模块中没有内嵌 WASM")
 	}
-	start += len(base64Marker)
+	start += relative + len(base64Marker)
 	end := bytes.IndexByte(source[start:], '"')
 	if end < 0 {
 		return nil, errors.New("央视模块中的 WASM 数据不完整")
@@ -200,15 +235,17 @@ func extractWASM(source []byte) ([]byte, error) {
 	return decoded, nil
 }
 
-func extractLookupTable(source []byte) ([]byte, error) {
-	const startMarker = "__ATPRERUN__.push(function(){"
-	const callMarker = "HEAPU8.set("
+func extractLookupTable(source []byte, layout moduleLayout) ([]byte, error) {
+	startMarker, callMarker, offsetMarker := "__ATPRERUN__.push(function(){", "HEAPU8.set(", ",eb"
+	if layout.modern {
+		startMarker, callMarker, offsetMarker = "La.push(function(){", "F.set(", ",N"
+	}
 	start := bytes.Index(source, []byte(startMarker))
 	if start < 0 {
 		return nil, errors.New("央视模块中没有解密查找表")
 	}
 	start += len(startMarker)
-	table := make([]byte, 0, 721256)
+	table := make([]byte, 0, 1558792)
 	position := start
 	for {
 		relative := bytes.Index(source[position:], []byte(callMarker))
@@ -221,19 +258,19 @@ func extractLookupTable(source []byte) ([]byte, error) {
 			return nil, errors.New("央视模块中的解密查找表调用不完整")
 		}
 		body := source[callStart:callEnd]
-		separator := bytes.LastIndex(body, []byte(",eb"))
+		separator := bytes.LastIndex(body, []byte(offsetMarker))
 		if separator < 0 {
 			break
 		}
 		arraySource := strings.TrimSpace(string(body[:separator]))
-		offsetSource := strings.TrimSpace(string(body[separator+len(",eb"):]))
+		offsetSource := strings.TrimSpace(string(body[separator+len(offsetMarker):]))
 		if len(arraySource) < 2 || arraySource[0] != '[' || arraySource[len(arraySource)-1] != ']' {
 			return nil, errors.New("央视解密查找表不是数字数组")
 		}
 		offset := 0
 		if offsetSource != "" {
 			if offsetSource[0] != '+' {
-				return nil, fmt.Errorf("央视解密查找表偏移无效: eb%s", offsetSource)
+				return nil, fmt.Errorf("央视解密查找表偏移无效: %s%s", offsetMarker, offsetSource)
 			}
 			parsed, err := strconv.ParseFloat(offsetSource[1:], 64)
 			if err != nil {
@@ -247,22 +284,25 @@ func extractLookupTable(source []byte) ([]byte, error) {
 		values := strings.Split(arraySource[1:len(arraySource)-1], ",")
 		for i, raw := range values {
 			value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-			if err != nil {
-				return nil, fmt.Errorf("解析央视解密查找表第 %d 项: %w", len(table)+i+1, err)
+			if err != nil || value < 0 || value > 255 || math.Trunc(value) != value {
+				return nil, fmt.Errorf("央视解密查找表第 %d 项不是字节: %q", len(table)+i+1, raw)
 			}
-			table = append(table, byte(uint64(value)))
+			table = append(table, byte(value))
 		}
 		position = callEnd + 1
 	}
-	if len(table) < 1024 || uint64(lookupTableBase)+uint64(len(table)) > 16*1024*1024 {
+	if len(table) < 1024 || uint64(layout.lookupTableBase)+uint64(len(table)) > 16*1024*1024 {
 		return nil, fmt.Errorf("央视解密查找表长度异常: %d", len(table))
 	}
 	return table, nil
 }
 
-func extractLookupRelocations(source []byte, tableLength int) ([]uint32, error) {
+func extractLookupRelocations(source []byte, tableLength int, modern bool) ([]uint32, error) {
 	const startMarker = ";var A=[];A="
-	const endMarker = ";for(var e=0;e<A.length;e++)HEAPU32"
+	endMarker := ";for(var e=0;e<A.length;e++)HEAPU32"
+	if modern {
+		endMarker = ";for(var B=0;B<A.length;B++)L[N+A[B]>>2]+=N"
+	}
 	start := bytes.Index(source, []byte(startMarker))
 	if start < 0 {
 		return nil, errors.New("央视模块中没有解密重定位表")
@@ -273,7 +313,7 @@ func extractLookupRelocations(source []byte, tableLength int) ([]uint32, error) 
 		return nil, errors.New("央视模块中的解密重定位表不完整")
 	}
 	body := source[start : start+end]
-	relocations := make([]uint32, 0, 16000)
+	relocations := make([]uint32, 0, 24000)
 	position := 0
 	for {
 		open := bytes.IndexByte(body[position:], '[')
@@ -288,8 +328,8 @@ func extractLookupRelocations(source []byte, tableLength int) ([]uint32, error) 
 		close += open + 1
 		for _, raw := range strings.Split(string(body[open+1:close]), ",") {
 			value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-			if err != nil {
-				return nil, fmt.Errorf("解析央视解密重定位项 %d: %w", len(relocations)+1, err)
+			if err != nil || value < 0 || value > math.MaxUint32 || math.Trunc(value) != value {
+				return nil, fmt.Errorf("解析央视解密重定位项 %d: %q", len(relocations)+1, raw)
 			}
 			offset := uint32(value)
 			if offset%4 != 0 || uint64(offset)+4 > uint64(tableLength) {
@@ -336,6 +376,13 @@ func matchingParenthesis(source []byte, start int) int {
 	return -1
 }
 
+func (e *Engine) functionName(legacy, modern string) string {
+	if e.layout.modern {
+		return modern
+	}
+	return legacy
+}
+
 func (e *Engine) instantiateHostModule(
 	ctx context.Context,
 	module *wabinwasm.Module,
@@ -368,6 +415,25 @@ func sessionFromContext(ctx context.Context) *hostSession {
 }
 
 func (e *Engine) hostFunction(name string) api.GoModuleFunction {
+	if e.layout.modern {
+		// Emscripten's new minifier assigned different export/import names.
+		switch name {
+		case "T":
+			name = "g" // getTempRet0
+		case "g":
+			name = "f" // emscripten_date_now
+		case "f":
+			name = "p" // gettimeofday
+		case "W":
+			name = "V" // cxa_uncaught_exceptions
+		case "U":
+			name = "T" // filesystem syscall
+		case "m":
+			name = "n" // abortOnCannotGrowMemory
+		case "n", "ba":
+			name = "o" // trap/abort
+		}
+	}
 	return api.GoModuleFunc(func(ctx context.Context, module api.Module, stack []uint64) {
 		memory := module.Memory()
 		session := sessionFromContext(ctx)
@@ -602,7 +668,7 @@ func (e *Engine) emvalTakeValue(ctx context.Context, module api.Module, session 
 		valuePointer, ok := module.Memory().ReadUint32Le(pointer)
 		if ok {
 			value = readNativeString(module.Memory(), valuePointer)
-			if free := module.ExportedFunction("Ba"); free != nil && valuePointer != 0 {
+			if free := module.ExportedFunction(e.functionName("Ba", "Da")); free != nil && valuePointer != 0 {
 				_, _ = free.Call(ctx, uint64(valuePointer))
 			}
 		}
@@ -657,7 +723,7 @@ func (e *Engine) emvalAs(ctx context.Context, module api.Module, session *hostSe
 func (e *Engine) emvalRunDestructors(ctx context.Context, module api.Module, session *hostSession, handle uint32) {
 	if pointers, ok := session.value(handle).([]uint32); ok {
 		for index := len(pointers) - 1; index >= 0; index-- {
-			if free := module.ExportedFunction("Ba"); free != nil && pointers[index] != 0 {
+			if free := module.ExportedFunction(e.functionName("Ba", "Da")); free != nil && pointers[index] != 0 {
 				_, _ = free.Call(ctx, uint64(pointers[index]))
 			}
 		}
@@ -714,7 +780,7 @@ func (e *Engine) evaluateEnvironment(ctx context.Context, module api.Module, nam
 	default:
 		value = ""
 	}
-	malloc := module.ExportedFunction("Fa")
+	malloc := module.ExportedFunction(e.functionName("Fa", "Ha"))
 	results, err := malloc.Call(ctx, uint64(len(value)+1))
 	if err != nil || len(results) == 0 {
 		panic(fmt.Sprintf("央视 WASM 分配环境字符串失败: %v", err))

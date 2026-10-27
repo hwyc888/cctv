@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,5 +77,33 @@ func TestLiveSegmentWithoutBrowser(t *testing.T) {
 		if err := os.WriteFile(outputPath, output, 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestExtractModernPlayerModule(t *testing.T) {
+	// The 2026 CCTV player uses M instead of wasmBinaryFile and N-based
+	// lookup offsets. Test the parser without downloading official content.
+	source := []byte("var M=\"data:application/octet-stream;base64,AGFzbQEAAAA=\";" +
+		"La.push(function(){F.set([" + strings.Repeat("1,", 1023) + "1],N);" +
+		"var A=[];A=A.concat([0,4]);for(var B=0;B<A.length;B++)L[N+A[B]>>2]+=N")
+	layout := modernLayout
+	wasm, err := extractWASM(source)
+	if err != nil || len(wasm) < 8 {
+		t.Fatalf("extract modern wasm: %v", err)
+	}
+	table, err := extractLookupTable(source, layout)
+	if err != nil || len(table) != 1024 {
+		t.Fatalf("extract modern lookup table: %v (size %d)", err, len(table))
+	}
+	offsets, err := extractLookupRelocations(source, len(table), true)
+	if err != nil || len(offsets) != 2 || offsets[1] != 4 {
+		t.Fatalf("extract modern relocations: %v (offsets %v)", err, offsets)
+	}
+}
+
+func TestRejectUnknownPlayerModule(t *testing.T) {
+	_, err := extractWASM([]byte("<html>redirect</html>"))
+	if err == nil {
+		t.Fatal("expected an error when the source is not a supported CCTV worker")
 	}
 }
