@@ -90,6 +90,47 @@ func TestLiveVideoVisualDecode(t *testing.T) {
 	if err := os.WriteFile(path, joined.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Preserve short samples for local FFmpeg analysis when CI has no ffmpeg.
+	for candidateIndex, candidateURL := range video.HLSURLs {
+		candidatePlaylist, playlistErr := loadMediaPlaylist(ctx, client.HTTPClient(), candidateURL, 0)
+		if playlistErr != nil || len(candidatePlaylist.Segments) == 0 {
+			t.Logf("candidate %d playlist unavailable: %v", candidateIndex, playlistErr)
+			continue
+		}
+		var candidate bytes.Buffer
+		for n := 0; n < len(candidatePlaylist.Segments) && n < 2; n++ {
+			segment := candidatePlaylist.Segments[n]
+			raw, fetchErr := fetchBytes(ctx, client.HTTPClient(), segment.URL)
+			if fetchErr != nil {
+				t.Logf("candidate %d segment %d fetch error: %v", candidateIndex, n, fetchErr)
+				break
+			}
+			if segment.KeyURL != "" {
+				key, keyErr := fetchBytes(ctx, client.HTTPClient(), segment.KeyURL)
+				if keyErr != nil {
+					t.Logf("candidate %d key error: %v", candidateIndex, keyErr)
+					break
+				}
+				raw, fetchErr = decryptAES128(raw, key, segment.IV)
+				if fetchErr != nil {
+					t.Logf("candidate %d AES error: %v", candidateIndex, fetchErr)
+					break
+				}
+			}
+			candidate.Write(raw)
+		}
+		name := filepath.Join(dir, fmt.Sprintf("candidate-%d.ts", candidateIndex))
+		if candidate.Len() != 0 {
+			if err := os.WriteFile(name, candidate.Bytes(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("candidate=%d segments=%d size=%d", candidateIndex, len(candidatePlaylist.Segments), candidate.Len())
+		}
+	}
+	if os.Getenv("CCTV_VISUAL_COLLECT_ONLY") == "1" {
+		t.Log("collected video samples for local FFmpeg analysis")
+		return
+	}
 	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name,width,height", "-of", "default=noprint_wrappers=1", path)
 	probe, err := cmd.CombinedOutput()
 	t.Logf("ffprobe: %v %s", err, strings.TrimSpace(string(probe)))
