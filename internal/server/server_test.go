@@ -64,8 +64,35 @@ func TestUpdateSettingsPersistsVideoVerificationSwitch(t *testing.T) {
 		t.Fatalf("settings update failed: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	settings := stateStore.Snapshot().Settings
-	if !settings.VerifyVideoAfterDownload || !settings.DownloadsPaused {
-		t.Fatalf("verification switch or pause state was not persisted: %#v", settings)
+	if !settings.VerifyVideoAfterDownload || !settings.DownloadsPaused || settings.SegmentConcurrency != model.DefaultSegmentConcurrency {
+		t.Fatalf("verification switch, pause state, or legacy segment setting was not persisted: %#v", settings)
+	}
+}
+
+func TestUpdateSettingsRejectsInvalidSegmentConcurrency(t *testing.T) {
+	dataDir := t.TempDir()
+	stateStore, err := store.Open(context.Background(), filepath.Join(dataDir, "state.db"), dataDir, model.Settings{
+		DownloadPath: filepath.Join(dataDir, "downloads"),
+		PollIntervalMinutes: 30,
+		ConcurrentDownloads: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stateStore.Close()
+	client := cctv.New()
+	handler := New(stateStore, client, service.NewManager(stateStore, client), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for _, value := range []int{-1, model.MaxSegmentConcurrency + 1} {
+		payload, err := json.Marshal(model.Settings{PollIntervalMinutes: 30, ConcurrentDownloads: 2, SegmentConcurrency: value})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewReader(payload))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("segment concurrency %d: expected 400, got %d: %s", value, response.Code, response.Body.String())
+		}
 	}
 }
 

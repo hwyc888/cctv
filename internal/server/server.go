@@ -320,6 +320,10 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("并发下载数需在 1 到 10 之间"))
 		return
 	}
+	// Older Web clients do not send this field; retain their saved value.
+	if input.SegmentConcurrency == 0 {
+		input.SegmentConcurrency = s.store.Snapshot().Settings.SegmentConcurrency
+	}
 	if input.SegmentConcurrency < 1 || input.SegmentConcurrency > model.MaxSegmentConcurrency {
 		writeError(w, http.StatusBadRequest, errors.New("单集分片并发数需在 1 到 16 之间"))
 		return
