@@ -44,13 +44,13 @@ jobs:
                   print("ERROR",type(err).__name__,str(err),flush=True)
           PY
 
+      - uses: actions/checkout@v4
       - name: Download current player module for compatibility analysis
         shell: bash
         run: |
           mkdir -p inspector
           curl --fail --show-error --silent --location --retry 2 "https://player.cntv.cn/h5vod/cctv.worker.js" -o inspector/cctv.worker.js
           test "$(wc -c < inspector/cctv.worker.js)" -gt 100000
-      - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
@@ -58,7 +58,7 @@ jobs:
       - name: Test live CCTV WASM initialization in pure Go
         run: go test ./internal/cctvwasm -run TestOfficialModuleStartsWithoutBrowser -count=1 -v -timeout 4m
         env:
-          CCTV_WASM_SOURCE: inspector/cctv.worker.js
+          CCTV_WASM_SOURCE: ../../inspector/cctv.worker.js
       - name: Upload public player module for debugging
         uses: actions/upload-artifact@v4
         with:
