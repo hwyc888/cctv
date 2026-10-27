@@ -26,29 +26,17 @@ jobs:
           sudo apt-get install -y -qq ffmpeg
           command -v ffmpeg
           command -v ffprobe
-      - name: Check whether alternative CCTV HLS sources produce clear video
+      - name: Check alternative CCTV HLS sources
         env:
           CCTV_INTEGRATION: "1"
           CCTV_FFMPEG_PATH: /usr/bin/ffmpeg
           CCTV_FFPROBE_PATH: /usr/bin/ffprobe
-        run: go test ./internal/service -run '^TestCCTVStreamCandidatesDecodeIntegration        env:
-          CCTV_VISUAL_INTEGRATION: "1"
-          CCTV_VISUAL_OUTPUT: /tmp/cctv-video-check
-        run: go test ./internal/service -run '^TestLiveVideoVisualDecode$' -count=1 -v -timeout 8m
-      - name: Upload actual decoded frame
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: real-cctv-decode-check
-          path: /tmp/cctv-video-check/*.png
-          if-no-files-found: ignore
-          retention-days: 1
- -count=1 -v -timeout 5m
+        run: go test ./internal/service -run TestCCTVStreamCandidatesDecodeIntegration -count=1 -v -timeout 5m
       - name: Decode and verify real CCTV HLS video frames
         env:
           CCTV_VISUAL_INTEGRATION: "1"
           CCTV_VISUAL_OUTPUT: /tmp/cctv-video-check
-        run: go test ./internal/service -run '^TestLiveVideoVisualDecode$' -count=1 -v -timeout 8m
+        run: go test ./internal/service -run TestLiveVideoVisualDecode -count=1 -v -timeout 8m
       - name: Upload actual decoded frame
         if: always()
         uses: actions/upload-artifact@v4
