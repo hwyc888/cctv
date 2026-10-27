@@ -43,6 +43,8 @@ func New(s *store.Store, client *cctv.Client, manager *service.Manager, logger *
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", server.deleteSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/check", server.checkSubscription)
 	mux.HandleFunc("GET /api/downloads", server.downloads)
+	mux.HandleFunc("GET /api/downloads/{id}/video", server.streamDownloadedVideo)
+	mux.HandleFunc("POST /api/downloads/{id}/open-directory", server.openDownloadedDirectory)
 	mux.HandleFunc("POST /api/downloads/pause-all", server.pauseAllDownloads)
 	mux.HandleFunc("POST /api/downloads/resume-all", server.resumeAllDownloads)
 	mux.HandleFunc("POST /api/downloads/{id}/retry", server.retryDownload)

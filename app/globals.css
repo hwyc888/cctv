@@ -155,3 +155,20 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }
+
+/* Completed download actions and in-browser video player */
+.task-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 7px; }
+.task-actions > button.open-folder, .task-actions > button.play-video { font-size: 10px; font-weight: 700; white-space: nowrap; padding: 0 12px; }
+.task-actions > button.play-video { color: #19805c; border-color: #bde1d3; background: #edf8f3; }
+.task-actions > button.open-folder:hover { color: #cc553a; border-color: #efc5ba; }
+.task-actions > button:disabled { cursor: wait; opacity: .6; }
+.task-file b { flex: 0 0 auto; font-weight: 600; color: #32765d; }
+.video-modal { width: min(960px, 100%); overflow: hidden; border-radius: 14px; background: #fff; box-shadow: 0 35px 90px rgba(0,0,0,.35); }
+.video-modal-header { min-height: 64px; padding: 15px 20px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.video-modal-header > div { display: grid; gap: 5px; min-width: 0; }
+.video-modal-header strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.video-modal-header small { font-size: 10px; color: #829098; }
+.video-modal-header button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 8px; background: #f3f4f1; cursor: pointer; color: #687178; }
+.video-modal video { display: block; width: 100%; max-height: 70vh; aspect-ratio: 16 / 9; object-fit: contain; background: #0d1216; }
+.video-modal > p { margin: 0; padding: 13px 20px 17px; font-size: 10px; color: #849097; }
+@media (max-width: 560px) { .task-actions { max-width: 160px; } .task-actions > button { width: 100%; } .video-modal-header { padding: 12px; } }
