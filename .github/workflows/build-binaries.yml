@@ -61,7 +61,7 @@ jobs:
           Description: CCTV subscription downloader with embedded Web UI
            Self-hosted CCTV subscription downloader, API, SQLite, and Web manager.
           EOF
-            dpkg-deb --build "${root}" "release/cctv-sub_${version}_${arch}.deb"
+            dpkg-deb --build --root-owner-group "${root}" "release/cctv-sub_${version}_${arch}.deb"
           done
 
       - name: Smoke-test standalone server and Web UI
@@ -105,11 +105,16 @@ jobs:
           script: |
             const { owner, repo } = context.repo;
             const currentId = context.runId;
-            const runs = await github.paginate(
-              github.rest.actions.listWorkflowRuns,
-              { owner, repo, workflow_id: "build-binaries.yml", per_page: 100 },
-              (response) => response.data.workflow_runs
-            );
+            const runs = [];
+            for (let page = 1; ; page++) {
+              const response = await github.rest.actions.listWorkflowRuns({
+                owner, repo, workflow_id: "build-binaries.yml", per_page: 100, page
+              });
+              const batch = response.data.workflow_runs;
+              if (!Array.isArray(batch)) throw new Error("Unexpected workflow runs API response");
+              runs.push(...batch);
+              if (batch.length < 100) break;
+            }
             const successfulPrevious = runs
               .filter(run => run.id !== currentId && run.status === "completed" && run.conclusion === "success")
               .sort((a, b) => new Date(b.created_at) - new Date(a.created_at) || b.id - a.id)[0];
