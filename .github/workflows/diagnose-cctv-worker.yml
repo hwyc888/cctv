@@ -43,3 +43,17 @@ jobs:
               except Exception as err:
                   print("ERROR",type(err).__name__,str(err),flush=True)
           PY
+
+      - name: Download current player module for compatibility analysis
+        shell: bash
+        run: |
+          mkdir -p inspector
+          curl --fail --show-error --silent --location --retry 2 "https://player.cntv.cn/h5vod/cctv.worker.js" -o inspector/cctv.worker.js
+          test "$(wc -c < inspector/cctv.worker.js)" -gt 100000
+      - name: Upload public player module for debugging
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-cctv-worker-source
+          path: inspector/cctv.worker.js
+          retention-days: 1
+          if-no-files-found: error
