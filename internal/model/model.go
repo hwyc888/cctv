@@ -1,9 +1,15 @@
 package model
 
+const (
+	DefaultSegmentConcurrency = 4
+	MaxSegmentConcurrency     = 16
+)
+
 type Settings struct {
 	DownloadPath             string `json:"downloadPath,omitempty"`
 	PollIntervalMinutes      int    `json:"pollIntervalMinutes"`
 	ConcurrentDownloads      int    `json:"concurrentDownloads"`
+	SegmentConcurrency       int    `json:"segmentConcurrency"`
 	VerifyVideoAfterDownload bool   `json:"verifyVideoAfterDownload"`
 	DownloadsPaused          bool   `json:"downloadsPaused"`
 }

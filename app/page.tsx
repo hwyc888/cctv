@@ -82,13 +82,14 @@ type DownloadTask = {
 type AppSettings = {
   pollIntervalMinutes: number;
   concurrentDownloads: number;
+  segmentConcurrency: number;
   verifyVideoAfterDownload: boolean;
   downloadsPaused: boolean;
 };
 type Stats = { subscriptions: number; queued: number; downloading: number; paused: number; completed: number; failed: number };
 type AppState = { settings: AppSettings; categories: StorageCategory[]; subscriptions: Subscription[]; downloads: DownloadTask[]; stats: Stats };
 
-const initialSettings: AppSettings = { pollIntervalMinutes: 30, concurrentDownloads: 2, verifyVideoAfterDownload: false, downloadsPaused: false };
+const initialSettings: AppSettings = { pollIntervalMinutes: 30, concurrentDownloads: 2, segmentConcurrency: 4, verifyVideoAfterDownload: false, downloadsPaused: false };
 const initialStats: Stats = { subscriptions: 0, queued: 0, downloading: 0, paused: 0, completed: 0, failed: 0 };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -412,8 +413,8 @@ export default function Home() {
         {tab === "settings" && <section className="page-content settings-grid">
           <div className="settings-stack">
             <form className="settings-card" onSubmit={saveSettings}>
-              <div className="settings-card-head"><span><SlidersHorizontal size={20} /></span><div><h3>订阅与任务</h3><p>修改后无需重启服务</p></div></div>
-              <div className="field-grid"><label className="field-label">轮询间隔（分钟）<input type="number" min={1} max={10080} value={settingsDraft.pollIntervalMinutes} onChange={(event) => setSettingsDraft({ ...settingsDraft, pollIntervalMinutes: Number(event.target.value) })} /><small>建议 15 分钟以上</small></label><label className="field-label">并发下载数<input type="number" min={1} max={10} value={settingsDraft.concurrentDownloads} onChange={(event) => setSettingsDraft({ ...settingsDraft, concurrentDownloads: Number(event.target.value) })} /><small>建议 2–4 个任务</small></label></div>
+              <div className="settings-card-head"><span><SlidersHorizontal size={20} /></span><div><h3>订阅与任务</h3><p>无需重启，新下载任务自动使用并发设置</p></div></div>
+              <div className="field-grid"><label className="field-label">轮询间隔（分钟）<input type="number" min={1} max={10080} value={settingsDraft.pollIntervalMinutes} onChange={(event) => setSettingsDraft({ ...settingsDraft, pollIntervalMinutes: Number(event.target.value) })} /><small>建议 15 分钟以上</small></label><label className="field-label">同时下载剧集数<input type="number" min={1} max={10} value={settingsDraft.concurrentDownloads} onChange={(event) => setSettingsDraft({ ...settingsDraft, concurrentDownloads: Number(event.target.value) })} /><small>建议 1–2 集，多个剧集同时处理会占用更多 CPU</small></label><label className="field-label">单集分片并发数<input type="number" min={1} max={16} value={settingsDraft.segmentConcurrency} onChange={(event) => setSettingsDraft({ ...settingsDraft, segmentConcurrency: Number(event.target.value) })} /><small>建议 4–8 路，同时下载一集的多个 TS 分片</small></label></div>
               <label className="toggle-setting"><span className="toggle-icon"><ShieldCheck size={19} /></span><span className="toggle-copy"><b>下载完成后检测花屏</b><small>开启后会严格解码整片，能发现坏帧但会增加 CPU 占用</small></span><input type="checkbox" checked={settingsDraft.verifyVideoAfterDownload} onChange={(event) => setSettingsDraft({ ...settingsDraft, verifyVideoAfterDownload: event.target.checked })} /><span className="toggle-switch" aria-hidden="true" /></label>
               <button className="save-button" disabled={savingSettings || !connected}>{savingSettings ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />}{savingSettings ? "正在保存" : "保存设置"}</button>
             </form>

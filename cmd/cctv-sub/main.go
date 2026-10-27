@@ -36,7 +36,7 @@ func main() {
 	if defaultDownloadPath == "" {
 		defaultDownloadPath = filepath.Join(workingDir, "downloads")
 	}
-	defaults := model.Settings{DownloadPath: defaultDownloadPath, PollIntervalMinutes: 30, ConcurrentDownloads: 2}
+	defaults := model.Settings{DownloadPath: defaultDownloadPath, PollIntervalMinutes: 30, ConcurrentDownloads: 2, SegmentConcurrency: model.DefaultSegmentConcurrency}
 	stateStore, err := store.Open(context.Background(), *databasePath, *dataDir, defaults)
 	if err != nil {
 		logger.Error("open application state", "error", err)

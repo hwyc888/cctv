@@ -31,6 +31,8 @@ jobs:
           cache: true
       - name: Test Go backend
         run: go test ./...
+      - name: Race-test parallel HLS downloads
+        run: go test -race ./internal/service ./internal/store
 
       - name: Cross-compile Windows and Debian
         shell: bash

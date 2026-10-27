@@ -693,24 +693,24 @@ func (m *Manager) runGoPlayerDecryptor(ctx context.Context, taskID string, segme
 	keys := make(map[string][]byte)
 	started := time.Now()
 	downloadedBytes := int64(0)
-	for index, segment := range segments {
+	parallelism := m.store.Snapshot().Settings.SegmentConcurrency
+	if err := fetchSegmentsInOrder(ctx, m.cctv.HTTPClient(), segments, parallelism, func(index int, data []byte) error {
+		segment := segments[index]
 		if err := ctx.Err(); err != nil {
 			return err
-		}
-		data, err := fetchBytes(ctx, m.cctv.HTTPClient(), segment.URL)
-		if err != nil {
-			return fmt.Errorf("下载最高画质分片 %d/%d: %w", index+1, len(segments), err)
 		}
 		downloadedBytes += int64(len(data))
 		if segment.KeyURL != "" {
 			key := keys[segment.KeyURL]
 			if key == nil {
+				var err error
 				key, err = fetchBytes(ctx, m.cctv.HTTPClient(), segment.KeyURL)
 				if err != nil {
 					return fmt.Errorf("下载 HLS 密钥: %w", err)
 				}
 				keys[segment.KeyURL] = key
 			}
+			var err error
 			data, err = decryptAES128(data, key, segment.IV)
 			if err != nil {
 				return fmt.Errorf("解密 HLS 分片 %d/%d: %w", index+1, len(segments), err)
@@ -732,8 +732,11 @@ func (m *Manager) runGoPlayerDecryptor(ctx context.Context, taskID string, segme
 		progress := 2 + float64(index+1)/float64(len(segments))*90
 		_ = m.updateTask(taskID, func(task *model.DownloadTask) {
 			task.Progress = progress
-			task.Speed = fmt.Sprintf("纯 Go 解密最高画质 %d/%d · %s", index+1, len(segments), speed)
+			task.Speed = fmt.Sprintf("%d 路分片并发 · 纯 Go 解密 %d/%d · %s", parallelism, index+1, len(segments), speed)
 		})
+		return nil
+	}); err != nil {
+		return err
 	}
 	if err := clearFile.Close(); err != nil {
 		return fmt.Errorf("完成解密临时文件: %w", err)

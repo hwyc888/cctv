@@ -148,6 +148,12 @@ func normalize(state *model.State, defaults model.Settings) {
 	if state.Settings.ConcurrentDownloads < 1 {
 		state.Settings.ConcurrentDownloads = defaults.ConcurrentDownloads
 	}
+	if state.Settings.SegmentConcurrency < 1 || state.Settings.SegmentConcurrency > model.MaxSegmentConcurrency {
+		state.Settings.SegmentConcurrency = defaults.SegmentConcurrency
+		if state.Settings.SegmentConcurrency < 1 || state.Settings.SegmentConcurrency > model.MaxSegmentConcurrency {
+			state.Settings.SegmentConcurrency = model.DefaultSegmentConcurrency
+		}
+	}
 	if state.Categories == nil {
 		state.Categories = []model.StorageCategory{}
 	}
