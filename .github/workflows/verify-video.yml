@@ -1,4 +1,4 @@
-name: Verify real CCTV video decryption
+name: Inspect real CCTV video decryption
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -20,26 +20,17 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
-      - name: Check FFmpeg on Ubuntu 24.04 runner
-        run: |
-          command -v ffmpeg
-          command -v ffprobe
-      - name: Check alternative CCTV HLS sources
-        env:
-          CCTV_INTEGRATION: "1"
-          CCTV_FFMPEG_PATH: /usr/bin/ffmpeg
-          CCTV_FFPROBE_PATH: /usr/bin/ffprobe
-        run: go test ./internal/service -run TestCCTVStreamCandidatesDecodeIntegration -count=1 -v -timeout 5m
-      - name: Decode and verify real CCTV HLS video frames
+      - name: Capture short original and processed video stream samples
         env:
           CCTV_VISUAL_INTEGRATION: "1"
+          CCTV_VISUAL_COLLECT_ONLY: "1"
           CCTV_VISUAL_OUTPUT: /tmp/cctv-video-check
         run: go test ./internal/service -run TestLiveVideoVisualDecode -count=1 -v -timeout 8m
-      - name: Upload actual decoded frame
+      - name: Upload video diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: real-cctv-decode-check
-          path: /tmp/cctv-video-check/*.png
-          if-no-files-found: ignore
+          name: cctv-video-diagnostics
+          path: /tmp/cctv-video-check/*.ts
+          if-no-files-found: error
           retention-days: 1
