@@ -107,3 +107,56 @@ func TestHealthIncludesBuildRevision(t *testing.T) {
 		t.Fatalf("health version is absent: %s", body)
 	}
 }
+
+func TestLiveAnimationHTTPSelection(t *testing.T) {
+	if os.Getenv("CCTV_LIBRARY_INTEGRATION") != "1" {
+		t.Skip("enable real CCTV API tests")
+	}
+	dir := t.TempDir()
+	st, err := store.Open(context.Background(), filepath.Join(dir, "state.db"), filepath.Join(dir, "downloads"), model.Settings{
+		PollIntervalMinutes: 30, ConcurrentDownloads: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	client := cctv.New()
+	handler := New(st, client, service.NewManager(st, client), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	const albumID = "VIDATdlHRnTKXUY171juqvUA261010"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/library/episodes?kind=animation&id="+albumID+"&page=1", nil))
+	if response.Code != 200 {
+		t.Fatalf("HTTP animation episode lookup failed: %d %s", response.Code, response.Body.String())
+	}
+	var data cctv.LibraryEpisodes
+	if err := json.Unmarshal(response.Body.Bytes(), &data); err != nil {
+		t.Fatal(err)
+	}
+	if data.Total != 26 || data.Page != 1 || len(data.Episodes) != 26 {
+		t.Fatalf("the actual Tom Cat album should offer 26 episodes, got total=%d page=%d length=%d", data.Total, data.Page, len(data.Episodes))
+	}
+	t.Logf("HTTP animation catalog: total=%d, selectable=%d, first=%s", data.Total, len(data.Episodes), data.Episodes[0].Title)
+	payload, _ := json.Marshal(map[string]any{
+		"kind": "animation", "id": albumID, "page": data.Page,
+		"programTitle": "汤姆猫超能战队（第一季）",
+		"videoGuids": []string{data.Episodes[0].VideoGUID},
+		"storageCategoryId": st.Snapshot().Categories[0].ID,
+	})
+	for n := 0; n < 2; n++ {
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, httptest.NewRequest(http.MethodPost, "/api/library/downloads", bytes.NewReader(payload)))
+		if result.Code != 201 {
+			t.Fatalf("enqueue animation episode failed %d: %s", result.Code, result.Body.String())
+		}
+		var stats map[string]int
+		if err := json.Unmarshal(result.Body.Bytes(), &stats); err != nil {
+			t.Fatal(err)
+		}
+		if stats["added"] != 1-n || stats["skipped"] != n {
+			t.Fatalf("duplicate handling failed: %#v", stats)
+		}
+	}
+	if len(st.Snapshot().Downloads) != 1 || len(st.Snapshot().Subscriptions) != 0 {
+		t.Fatal("animation selection should create one ad hoc task and no subscription")
+	}
+}
