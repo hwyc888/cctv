@@ -37,6 +37,7 @@ type LibraryEpisodes struct {
 	ID       string          `json:"id"`
 	Page     int             `json:"page"`
 	HasMore  bool            `json:"hasMore"`
+	Total    int             `json:"total,omitempty"`
 	Episodes []model.Episode `json:"episodes"`
 }
 
@@ -214,6 +215,35 @@ func safeCCTVLink(value string) string {
 	return u.String()
 }
 
+// CCTV album videos can appear in different API modes. Mode 2 combines the
+// modes used for full episodes and clips; query the others only as fallbacks.
+// The upstream total, not the count on this page, determines pagination.
+type libraryVideoList struct {
+	Data *struct {
+		Total json.RawMessage `json:"total"`
+		List []struct {
+			GUID  string `json:"guid"`
+			Title string `json:"title"`
+			Time  string `json:"time"`
+			Image string `json:"image"`
+			URL   string `json:"url"`
+			Brief string `json:"brief"`
+		} `json:"list"`
+	} `json:"data"`
+}
+
+func libraryTotal(raw json.RawMessage) int {
+	var count int
+	if json.Unmarshal(raw, &count) == nil {
+		return count
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		count, _ = strconv.Atoi(text)
+	}
+	return count
+}
+
 func (c *Client) BrowseLibraryEpisodes(ctx context.Context, kind, id string, page int) (LibraryEpisodes, error) {
 	if _, ok := libraryKinds[kind]; !ok || !validLibraryPage(page) || !libraryIDRE.MatchString(id) {
 		return LibraryEpisodes{}, errors.New("无效的央视节目或页码")
@@ -221,9 +251,10 @@ func (c *Client) BrowseLibraryEpisodes(ctx context.Context, kind, id string, pag
 	result := LibraryEpisodes{Kind: kind, ID: id, Page: page, Episodes: []model.Episode{}}
 	query := url.Values{
 		"id": {id}, "p": {strconv.Itoa(page)}, "n": {strconv.Itoa(libraryEpisodePageSize)},
-		"mode": {"0"}, "serviceId": {"tvcctv"},
+		"serviceId": {"tvcctv"},
 	}
 	endpoint := "https://api.cntv.cn/NewVideo/getVideoListByAlbumIdNew"
+	modes := []string{"2", "1", "0"}
 	if kind == "columns" {
 		if !libraryGUIDRE.MatchString(id) {
 			return result, errors.New("栏目需要有效的视频 GUID")
@@ -235,9 +266,7 @@ func (c *Client) BrowseLibraryEpisodes(ctx context.Context, kind, id string, pag
 		}
 		var info struct {
 			CTID string `json:"ctid"`
-			Data struct {
-				CTID string `json:"ctid"`
-			} `json:"data"`
+			Data struct { CTID string `json:"ctid"` } `json:"data"`
 		}
 		if err := json.Unmarshal(infoBody, &info); err != nil {
 			return result, fmt.Errorf("解析栏目标识失败: %w", err)
@@ -253,52 +282,76 @@ func (c *Client) BrowseLibraryEpisodes(ctx context.Context, kind, id string, pag
 		query.Set("sort", "desc")
 		query.Set("d", "")
 		endpoint = "https://api.cntv.cn/NewVideo/getVideoListByColumn"
+		modes = []string{"0", "2", "1"}
 	} else {
-		// Animation and drama albums commonly use mode=1, but CCTV special
-		// event albums may be entirely mode=0: mode=2 includes both.
-		if kind == "special" {
-			query.Set("mode", "2")
-		} else {
-			query.Set("mode", "1")
-		}
 		query.Set("sort", "asc")
 		query.Set("pub", "1")
 	}
-	body, err := c.fetch(ctx, endpoint+"?"+query.Encode())
-	if err != nil {
-		return result, fmt.Errorf("读取央视节目选集: %w", err)
+
+	// If the first page is empty, probe a few later pages. Some albums
+	// expose usable videos only after an empty first API page. The returned
+	// Page is the actual upstream page, so selection validation stays correct.
+	lastPage := page
+	if page == 1 && kind != "columns" {
+		lastPage = 3
 	}
-	var payload struct {
-		Data struct {
-			Total json.RawMessage `json:"total"`
-			List []struct {
-				GUID  string `json:"guid"`
-				Title string `json:"title"`
-				Time  string `json:"time"`
-				Image string `json:"image"`
-				URL   string `json:"url"`
-				Brief string `json:"brief"`
-			} `json:"list"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return result, fmt.Errorf("解析央视选集列表失败: %w", err)
-	}
-	for index, item := range payload.Data.List {
-		if !libraryGUIDRE.MatchString(item.GUID) || strings.TrimSpace(item.Title) == "" {
-			continue
+	var lastErr error
+	sawValidResponse := false
+	for currentPage := page; currentPage <= lastPage; currentPage++ {
+		query.Set("p", strconv.Itoa(currentPage))
+		for _, mode := range modes {
+			query.Set("mode", mode)
+			body, err := c.fetch(ctx, endpoint+"?"+query.Encode())
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			var payload libraryVideoList
+			if err := json.Unmarshal(body, &payload); err != nil {
+				lastErr = fmt.Errorf("央视视频列表格式异常: %w", err)
+				continue
+			}
+			if payload.Data == nil {
+				lastErr = errors.New("央视接口未返回视频列表数据")
+				continue
+			}
+			sawValidResponse = true
+			total := libraryTotal(payload.Data.Total)
+			if total > result.Total {
+				result.Total = total
+			}
+			episodes := make([]model.Episode, 0, len(payload.Data.List))
+			for index, item := range payload.Data.List {
+				if !libraryGUIDRE.MatchString(item.GUID) || strings.TrimSpace(item.Title) == "" {
+					continue
+				}
+				published := strings.TrimSpace(item.Time)
+				if len(published) >= 10 {
+					published = published[:10]
+				}
+				episodes = append(episodes, model.Episode{
+					Number: (currentPage-1)*libraryEpisodePageSize + index + 1,
+					Title: item.Title, VideoGUID: item.GUID,
+					PageURL: safeCCTVLink(item.URL), Image: absoluteURL(item.Image),
+					Description: item.Brief, PublishedAt: published,
+				})
+			}
+			if len(episodes) == 0 {
+				continue
+			}
+			result.Page = currentPage
+			result.Episodes = episodes
+			if result.Total > 0 {
+				result.HasMore = currentPage*libraryEpisodePageSize < result.Total
+			} else {
+				result.HasMore = len(payload.Data.List) >= libraryEpisodePageSize
+			}
+			return result, nil
 		}
-		published := strings.TrimSpace(item.Time)
-		if len(published) >= 10 {
-			published = published[:10]
-		}
-		result.Episodes = append(result.Episodes, model.Episode{
-			Number: (page-1)*libraryEpisodePageSize + index + 1,
-			Title: item.Title, VideoGUID: item.GUID,
-			PageURL: safeCCTVLink(item.URL), Image: absoluteURL(item.Image),
-			Description: item.Brief, PublishedAt: published,
-		})
 	}
-	result.HasMore = len(payload.Data.List) >= libraryEpisodePageSize
+	if !sawValidResponse {
+		return result, fmt.Errorf("读取央视节目选集失败: %w", lastErr)
+	}
+	result.HasMore = result.Total > 0 && page*libraryEpisodePageSize < result.Total
 	return result, nil
 }
