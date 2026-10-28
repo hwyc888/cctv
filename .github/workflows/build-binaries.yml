@@ -113,9 +113,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p tmp/windows-amd64 tmp/linux-amd64 tmp/linux-arm64 release
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags standalone -trimpath -ldflags="-s -w" -o tmp/windows-amd64/cctv-sub.exe ./cmd/cctv-sub
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags standalone -trimpath -ldflags="-s -w" -o tmp/linux-amd64/cctv-sub ./cmd/cctv-sub
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags standalone -trimpath -ldflags="-s -w" -o tmp/linux-arm64/cctv-sub ./cmd/cctv-sub
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags standalone -trimpath -ldflags="-s -w -X cctv-sub/internal/server.BuildRevision=${GITHUB_SHA}" -o tmp/windows-amd64/cctv-sub.exe ./cmd/cctv-sub
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags standalone -trimpath -ldflags="-s -w -X cctv-sub/internal/server.BuildRevision=${GITHUB_SHA}" -o tmp/linux-amd64/cctv-sub ./cmd/cctv-sub
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags standalone -trimpath -ldflags="-s -w -X cctv-sub/internal/server.BuildRevision=${GITHUB_SHA}" -o tmp/linux-arm64/cctv-sub ./cmd/cctv-sub
           file tmp/windows-amd64/cctv-sub.exe tmp/linux-amd64/cctv-sub tmp/linux-arm64/cctv-sub
           test -s tmp/windows-amd64/cctv-h5e-decrypt.exe
           chmod 755 tmp/linux-amd64/cctv-h5e-decrypt tmp/linux-arm64/cctv-h5e-decrypt
@@ -166,6 +166,7 @@ jobs:
             exit 1
           fi
           grep -q '"database":true' "${RUNNER_TEMP}/cctv-smoke/health.json"
+          grep -q "${GITHUB_SHA}" "${RUNNER_TEMP}/cctv-smoke/health.json"
           curl --fail --silent http://127.0.0.1:18080/ -o "${RUNNER_TEMP}/cctv-smoke/index.html"
           grep -q 'CCTV 自动追剧' "${RUNNER_TEMP}/cctv-smoke/index.html"
           curl --fail --silent http://127.0.0.1:18080/favicon.svg -o "${RUNNER_TEMP}/cctv-smoke/favicon.svg"

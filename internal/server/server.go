@@ -20,6 +20,11 @@ import (
 	"cctv-sub/internal/store"
 )
 
+// BuildRevision is set by GitHub Actions for release binaries. A visible
+// revision makes it possible to distinguish a new EXE from an older process
+// still occupying the same local HTTP port.
+var BuildRevision = "dev"
+
 type Server struct {
 	store   *store.Store
 	cctv    *cctv.Client
@@ -104,7 +109,7 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	defer cancel()
 	databaseOK := s.store.Ping(ctx) == nil
 	ready := ffmpegErr == nil && databaseOK
-	writeJSON(w, http.StatusOK, map[string]any{"ok": ready, "ffmpeg": ffmpegErr == nil, "playerDecryptor": true, "decryptorRuntime": "go-wasm", "database": databaseOK, "time": time.Now().Format(time.RFC3339)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": ready, "ffmpeg": ffmpegErr == nil, "playerDecryptor": true, "decryptorRuntime": "go-wasm", "database": databaseOK, "revision": BuildRevision, "time": time.Now().Format(time.RFC3339)})
 }
 
 func (s *Server) state(w http.ResponseWriter, _ *http.Request) {

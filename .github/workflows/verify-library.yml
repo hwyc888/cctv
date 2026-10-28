@@ -9,6 +9,8 @@ on:
       - internal/cctv/client.go
       - internal/cctv/link_test.go
       - internal/cctv/special_links_test.go
+      - internal/server/special_live_test.go
+      - internal/server/server.go
       - .github/workflows/verify-library.yml
 
 permissions:
@@ -27,4 +29,4 @@ jobs:
       - name: Verify CCTV program and episode browsing against real APIs
         env:
           CCTV_LIBRARY_INTEGRATION: "1"
-        run: go test ./internal/cctv -run '^TestLive(CCTVLibraryIntegration|SpecialProgramLinks)$' -count=1 -v -timeout 3m
+        run: go test ./internal/cctv ./internal/server -run '^TestLive(CCTVLibraryIntegration|SpecialProgramLinks|SpecialHTTPSelection)$' -count=1 -v -timeout 3m

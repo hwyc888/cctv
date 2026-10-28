@@ -193,6 +193,7 @@ export default function Home() {
   const [state, setState] = useState<AppState>({ settings: initialSettings, categories: [], subscriptions: [], downloads: [], stats: initialStats });
   const [connected, setConnected] = useState<boolean | null>(null);
   const [ffmpeg, setFfmpeg] = useState(false);
+  const [backendRevision, setBackendRevision] = useState("旧版/未知");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -236,7 +237,7 @@ export default function Home() {
     try {
       const [next, health] = await Promise.all([
         api<AppState>("/api/state"),
-        api<{ ok: boolean; ffmpeg: boolean }>("/api/health"),
+        api<{ ok: boolean; ffmpeg: boolean; revision?: string }>("/api/health"),
       ]);
 	  next.subscriptions = next.subscriptions ?? [];
 	  next.downloads = next.downloads ?? [];
@@ -248,6 +249,7 @@ export default function Home() {
       }
       setSelectedCategoryID((current) => next.categories.some((category) => category.id === current) ? current : (next.categories[0]?.id ?? ""));
       setFfmpeg(health.ffmpeg);
+      setBackendRevision(health.revision ? health.revision.slice(0, 8) : "旧版/未知");
       setConnected(true);
     } catch (error) {
       setConnected(false);
@@ -541,7 +543,7 @@ export default function Home() {
           <span className={`status-dot ${connected ? "online" : ""}`} />
           <div><b>{connected ? "服务运行中" : connected === null ? "正在连接" : "后台未连接"}</b><small>{connected ? `每 ${state.settings.pollIntervalMinutes} 分钟检查更新` : "请启动 Go 后台服务"}</small></div>
         </div>
-        <div className="sidebar-foot"><Sparkles size={15} /><span>官方源 · 自动归档</span></div>
+        <div className="sidebar-foot" title={`当前后台版本：${backendRevision}`}><Sparkles size={15} /><span>服务版本 {backendRevision}</span></div>
       </aside>
 
       <main className="main-area">
