@@ -152,3 +152,187 @@ func TestDeleteTasksRollsBackRenamesIfDatabaseSaveFails(t *testing.T) {
 	pending,_:=filepath.Glob(filepath.Join(filepath.Dir(file),".*.pending"))
 	if len(pending)!=0 {t.Fatalf("staged files left behind: %v",pending)}
 }
+
+func TestDeleteLastEpisodeRemovesEmptySeriesFolder(t *testing.T) {
+	m, st, dir, categoryID := setupTaskDeleteTest(t)
+	root := filepath.Join(dir, "downloads")
+	last := createTaskDeleteFile(t, root, "last")
+	seriesDir := filepath.Dir(last)
+	if err := st.Update(func(state *model.State) error {
+		state.Downloads = []model.DownloadTask{{
+			ID: "last", Title: "last", Status: "completed",
+			FilePath: last, StorageCategoryID: categoryID,
+		}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.DeleteTasks([]string{"last"})
+	if err != nil || result.Deleted != 1 || result.FilesDeleted != 1 || result.DirectoriesDeleted != 1 {
+		t.Fatalf("deleting the last MP4 should clean one series directory: %#v %v", result, err)
+	}
+	if _, err := os.Stat(seriesDir); !os.IsNotExist(err) {
+		t.Fatalf("empty series directory remains: %s, %v", seriesDir, err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("configured download root must never be deleted: %v", err)
+	}
+}
+
+func TestDeleteSelectedVideoKeepsSeriesFolderAndOtherEpisodes(t *testing.T) {
+	m, st, dir, categoryID := setupTaskDeleteTest(t)
+	root := filepath.Join(dir, "downloads")
+	selected := createTaskDeleteFile(t, root, "episode1")
+	untouched := createTaskDeleteFile(t, root, "episode2")
+	if err := st.Update(func(state *model.State) error {
+		state.Downloads = []model.DownloadTask{
+			{ID: "episode1", Status: "completed", FilePath: selected, StorageCategoryID: categoryID},
+			{ID: "episode2", Status: "completed", FilePath: untouched, StorageCategoryID: categoryID},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.DeleteTasks([]string{"episode1"})
+	if err != nil || result.FilesDeleted != 1 || result.DirectoriesDeleted != 0 {
+		t.Fatalf("unexpected result deleting one of two episodes: %#v %v", result, err)
+	}
+	if _, err := os.Stat(selected); !os.IsNotExist(err) {
+		t.Fatalf("selected MP4 is still present: %v", err)
+	}
+	if _, err := os.Stat(untouched); err != nil {
+		t.Fatalf("unselected MP4 must be preserved: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(untouched)); err != nil {
+		t.Fatalf("shared series folder must be preserved: %v", err)
+	}
+}
+
+func TestBatchDeleteLastVideosRemovesTheirDistinctDirectories(t *testing.T) {
+	m, st, dir, categoryID := setupTaskDeleteTest(t)
+	root := filepath.Join(dir, "downloads")
+	a := filepath.Join(root, "A", "first.mp4")
+	b := filepath.Join(root, "B", "second.mp4")
+	keep := filepath.Join(root, "C", "keep.mp4")
+	for _, path := range []string{a, b, keep} {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("data"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Update(func(state *model.State) error {
+		state.Downloads = []model.DownloadTask{
+			{ID: "a", Status: "completed", FilePath: a, StorageCategoryID: categoryID},
+			{ID: "b", Status: "completed", FilePath: b, StorageCategoryID: categoryID},
+			{ID: "keep", Status: "completed", FilePath: keep, StorageCategoryID: categoryID},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.DeleteTasks([]string{"a", "b"})
+	if err != nil || result.Deleted != 2 || result.FilesDeleted != 2 || result.DirectoriesDeleted != 2 {
+		t.Fatalf("batch directory cleanup failed: %#v %v", result, err)
+	}
+	for _, folder := range []string{filepath.Dir(a), filepath.Dir(b)} {
+		if _, err := os.Stat(folder); !os.IsNotExist(err) {
+			t.Fatalf("deleted item's folder still exists: %s %v", folder, err)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("unselected video missing: %v", err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("download root removed: %v", err)
+	}
+}
+
+func TestEmptyDirectoryCleanupPreservesUnrelatedFiles(t *testing.T) {
+	m, st, dir, categoryID := setupTaskDeleteTest(t)
+	root := filepath.Join(dir, "downloads")
+	video := createTaskDeleteFile(t, root, "episode")
+	parent := filepath.Dir(video)
+	other := filepath.Join(parent, "个人笔记.txt")
+	if err := os.WriteFile(other, []byte("keep me"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(func(state *model.State) error {
+		state.Downloads = []model.DownloadTask{{
+			ID: "episode", Status: "completed", FilePath: video, StorageCategoryID: categoryID,
+		}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.DeleteTasks([]string{"episode"})
+	if err != nil || result.FilesDeleted != 1 || result.DirectoriesDeleted != 0 {
+		t.Fatalf("an unrelated file must prevent whole-folder deletion: %#v %v", result, err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("user file must be preserved: %v", err)
+	}
+	if _, err := os.Stat(parent); err != nil {
+		t.Fatalf("directory with a user file must remain: %v", err)
+	}
+}
+
+func TestDeleteNestedEpisodePrunesParentsButNotCategoryRoot(t *testing.T) {
+	m, st, dir, categoryID := setupTaskDeleteTest(t)
+	root := filepath.Join(dir, "downloads")
+	season := filepath.Join(root, "动画", "第一季")
+	video := filepath.Join(season, "1.mp4")
+	if err := os.MkdirAll(season, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(video, []byte("MP4"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(func(state *model.State) error {
+		state.Downloads = []model.DownloadTask{{
+			ID: "nested", Status: "completed", FilePath: video, StorageCategoryID: categoryID,
+		}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.DeleteTasks([]string{"nested"})
+	if err != nil || result.DirectoriesDeleted != 2 {
+		t.Fatalf("nested empty directories not removed: %#v %v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "动画")); !os.IsNotExist(err) {
+		t.Fatalf("empty parent folder remains: %v", err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("category root removed: %v", err)
+	}
+}
+
+func TestDirectoryCleanupProtectsEveryConfiguredCategoryRoot(t *testing.T) {
+	m, st, dir, defaultCategoryID := setupTaskDeleteTest(t)
+	root := filepath.Join(dir, "downloads")
+	otherRoot := filepath.Join(root, "独立分类")
+	if _, err := m.AddCategory("独立分类", "", otherRoot); err != nil {
+		t.Fatal(err)
+	}
+	video := filepath.Join(otherRoot, "episode.mp4")
+	if err := os.WriteFile(video, []byte("MP4"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(func(state *model.State) error {
+		state.Downloads = []model.DownloadTask{{
+			ID: "overlapping", Status: "completed", FilePath: video, StorageCategoryID: defaultCategoryID,
+		}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := m.DeleteTasks([]string{"overlapping"})
+	if err != nil || result.FilesDeleted != 1 || result.DirectoriesDeleted != 0 {
+		t.Fatalf("configured nested root was not protected: %#v %v", result, err)
+	}
+	if _, err := os.Stat(otherRoot); err != nil {
+		t.Fatalf("other configured category root must remain: %v", err)
+	}
+}
