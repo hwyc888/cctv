@@ -32,7 +32,7 @@ func TestQueueSelectedSpecialProgramVideosByGUID(t *testing.T) {
 		case "/2025/05/29/VIDAofwleevTNcsQH3PjpAy0250529.shtml":
 			body = `<meta property="og:title" content="CMG世界机器人大赛 系列赛">`
 		case "/NewVideo/getVideoListByAlbumIdNew":
-			if req.URL.Query().Get("mode") != "1" {
+			if req.URL.Query().Get("mode") != "2" {
 				t.Errorf("wrong upstream mode %s", req.URL)
 			}
 			body = `{"data":{"list":[{"guid":"`+guid+`","title":"机甲格斗赛","url":"`+episodeURL+`"}]}}`
