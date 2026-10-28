@@ -160,6 +160,16 @@ function timeAgo(value?: string) {
   return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(value));
 }
 
+function subscriptionSourceKey(value?: string) {
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    return `${url.hostname.toLowerCase()}${url.pathname.replace(/\/+$/, "") || "/"}`;
+  } catch {
+    return value.trim().replace(/[?#].*$/, "").replace(/\/+$/, "");
+  }
+}
+
 function episodeKey(episode: Episode) {
   return episode.videoGuid || episode.pageUrl;
 }
@@ -335,7 +345,8 @@ export default function Home() {
       notify("央视目录没有提供可用于自动追更的节目主页链接，暂时无法直接订阅。请先打开选集，或通过“链接与搜索”粘贴节目主页链接。", "error");
       return;
     }
-    const existing = state.subscriptions.find((item) => item.sourceUrl === sourceUrl);
+    const sourceKey = subscriptionSourceKey(sourceUrl);
+    const existing = state.subscriptions.find((item) => subscriptionSourceKey(item.sourceUrl) === sourceKey);
     if (existing) {
       setTab("subscriptions");
       void openSubscriptionManager(existing);
@@ -844,7 +855,7 @@ export default function Home() {
                         {resolvingLibraryID === program.id ? "读取选集…" : "查看选集"}
                       </button>
                       {(() => {
-                        const subscribed = !!program.sourceUrl && state.subscriptions.some((item) => item.sourceUrl === program.sourceUrl);
+                        const subscribed = !!program.sourceUrl && state.subscriptions.some((item) => subscriptionSourceKey(item.sourceUrl) === subscriptionSourceKey(program.sourceUrl));
                         return <button
                           type="button"
                           className={`library-subscribe-button ${subscribed ? "subscribed" : ""}`}
