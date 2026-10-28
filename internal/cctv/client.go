@@ -34,6 +34,9 @@ var (
 	seriesRegionRE    = regexp.MustCompile(`(?s)<p><span>产地：</span>\s*([^<]*)</p>`)
 	episodeRE         = regexp.MustCompile(`(?s)\{\s*'title'\s*:\s*'((?:\\.|[^'])*)'\s*,\s*'img'\s*:\s*'((?:\\.|[^'])*)'\s*,\s*'brief'\s*:\s*'((?:\\.|[^'])*)'\s*,\s*'url'\s*:\s*'((?:\\.|[^'])*)'\s*\}`)
 	episodeNumberRE   = regexp.MustCompile(`第\s*(\d+)\s*集`)
+	episodePageRE     = regexp.MustCompile(`(?i)/VIDE[^/]*\.shtml$`)
+	seriesInTitleRE   = regexp.MustCompile(`^(.+?)\s*第\s*\d+\s*集`)
+	metaImageRE       = regexp.MustCompile(`(?i)<meta\s+property="og:image"\s+content="([^"]*)"`)
 	publishedRE       = regexp.MustCompile(`/((?:19|20)\d{2})/(\d{2})/(\d{2})/`)
 	guidRE            = regexp.MustCompile(`var\s+guid\s*=\s*"([a-fA-F0-9]+)"`)
 	tagRE             = regexp.MustCompile(`<[^>]+>`)
@@ -61,7 +64,7 @@ func (c *Client) Search(ctx context.Context, query string) ([]model.SearchResult
 		return nil, errors.New("请输入搜索关键词或 CCTV 剧集链接")
 	}
 	if u, err := url.Parse(query); err == nil && u.Hostname() == "tv.cctv.com" {
-		series, err := c.ResolveSeries(ctx, query)
+		series, err := c.ResolveLink(ctx, query)
 		if err != nil {
 			return nil, err
 		}
@@ -102,21 +105,66 @@ func (c *Client) Search(ctx context.Context, query string) ([]model.SearchResult
 	return results, nil
 }
 
-func (c *Client) ResolveSeries(ctx context.Context, rawURL string) (model.Series, error) {
+// ResolveLink accepts an episode video page as well as a series page.
+// A direct single-episode link must only preview that episode, even if
+// the playback page embeds suggestions for other episodes.
+func (c *Client) ResolveLink(ctx context.Context, rawURL string) (model.Series, error) {
 	normalized, err := normalizeCCTVURL(rawURL)
 	if err != nil {
 		return model.Series{}, err
 	}
 	body, err := c.fetch(ctx, normalized)
 	if err != nil {
-		return model.Series{}, fmt.Errorf("读取剧集页面: %w", err)
+		return model.Series{}, fmt.Errorf("读取央视页面: %w", err)
+	}
+	if u, err := url.Parse(normalized); err == nil && episodePageRE.MatchString(u.Path) {
+		if len(guidRE.FindSubmatch(body)) != 2 {
+			return model.Series{}, errors.New("单集页面没有可用的视频标识，请检查 CCTV 链接")
+		}
+		title := firstMatch(metaTitleRE, string(body))
+		if title == "" {
+			return model.Series{}, errors.New("单集页面没有可识别的视频标题")
+		}
+		number := 1
+		if match := episodeNumberRE.FindStringSubmatch(title); len(match) == 2 {
+			number, _ = strconv.Atoi(match[1])
+		}
+		seriesTitle := title
+		if match := seriesInTitleRE.FindStringSubmatch(title); len(match) == 2 {
+			seriesTitle = strings.TrimSpace(match[1])
+		}
+		image := absoluteURL(firstMatch(metaImageRE, string(body)))
+		published := ""
+		if match := publishedRE.FindStringSubmatch(normalized); len(match) == 4 {
+			published = strings.Join(match[1:], "-")
+		}
+		episode := model.Episode{Number: number, Title: title, Image: image, PageURL: normalized, PublishedAt: published}
+		return model.Series{
+			SearchResult: model.SearchResult{
+				Title: seriesTitle, SourceURL: normalized, Poster: image,
+				Description: firstMatch(metaDescriptionRE, string(body)),
+				EpisodeCount: 1, IsSingle: true,
+			},
+			Episodes: []model.Episode{episode},
+		}, nil
 	}
 	series := parseSeries(string(body), normalized)
 	if series.Title == "" {
-		return model.Series{}, errors.New("这个页面不是可识别的 CCTV 剧集页面")
+		return model.Series{}, errors.New("这个页面不是可识别的 CCTV 节目页面")
 	}
 	if len(series.Episodes) == 0 {
-		return model.Series{}, errors.New("页面中没有找到剧集列表，请确认链接是剧集主页而不是单集播放页")
+		return model.Series{}, errors.New("页面中没有找到可下载的选集列表；可以粘贴具体单集播放页")
+	}
+	return series, nil
+}
+
+func (c *Client) ResolveSeries(ctx context.Context, rawURL string) (model.Series, error) {
+	series, err := c.ResolveLink(ctx, rawURL)
+	if err != nil {
+		return model.Series{}, err
+	}
+	if series.IsSingle {
+		return model.Series{}, errors.New("自动追更需要剧集主页链接；单集请使用选集下载")
 	}
 	return series, nil
 }
@@ -245,11 +293,11 @@ func parseSeries(source, sourceURL string) model.Series {
 
 func normalizeCCTVURL(raw string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || u.Scheme == "" {
-		return "", errors.New("CCTV 链接格式不正确")
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") {
+		return "", errors.New("CCTV 链接必须以 http:// 或 https:// 开头")
 	}
-	if u.Hostname() != "tv.cctv.com" {
-		return "", errors.New("只支持 tv.cctv.com 的剧集链接")
+	if u.Hostname() != "tv.cctv.com" || u.Port() != "" || u.User != nil {
+		return "", errors.New("只支持 tv.cctv.com 的节目或单集链接")
 	}
 	u.RawQuery = ""
 	u.Fragment = ""

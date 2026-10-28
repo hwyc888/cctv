@@ -64,6 +64,8 @@ type DownloadTask struct {
 	Speed          string  `json:"speed,omitempty"`
 	FilePath       string  `json:"filePath,omitempty"`
 	VideoQuality   string  `json:"videoQuality,omitempty"`
+	PageURL        string  `json:"pageUrl,omitempty"`
+	StorageCategoryID string `json:"storageCategoryId,omitempty"`
 	Error          string  `json:"error,omitempty"`
 	CreatedAt      string  `json:"createdAt"`
 	StartedAt      string  `json:"startedAt,omitempty"`
@@ -87,6 +89,7 @@ type SearchResult struct {
 	Category     string `json:"category,omitempty"`
 	Region       string `json:"region,omitempty"`
 	EpisodeCount int    `json:"episodeCount,omitempty"`
+	IsSingle     bool   `json:"isSingle,omitempty"`
 }
 
 type Series struct {

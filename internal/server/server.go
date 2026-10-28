@@ -33,6 +33,7 @@ func New(s *store.Store, client *cctv.Client, manager *service.Manager, logger *
 	mux.HandleFunc("GET /api/health", server.health)
 	mux.HandleFunc("GET /api/state", server.state)
 	mux.HandleFunc("GET /api/search", server.search)
+	mux.HandleFunc("GET /api/resolve", server.resolveLink)
 	mux.HandleFunc("GET /api/categories", server.categories)
 	mux.HandleFunc("POST /api/categories", server.addCategory)
 	mux.HandleFunc("PUT /api/categories/{id}", server.updateCategory)
@@ -43,6 +44,7 @@ func New(s *store.Store, client *cctv.Client, manager *service.Manager, logger *
 	mux.HandleFunc("DELETE /api/subscriptions/{id}", server.deleteSubscription)
 	mux.HandleFunc("POST /api/subscriptions/{id}/check", server.checkSubscription)
 	mux.HandleFunc("GET /api/downloads", server.downloads)
+	mux.HandleFunc("POST /api/downloads", server.addDownloads)
 	mux.HandleFunc("GET /api/downloads/{id}/video", server.streamDownloadedVideo)
 	mux.HandleFunc("POST /api/downloads/{id}/open-directory", server.openDownloadedDirectory)
 	mux.HandleFunc("POST /api/downloads/pause-all", server.pauseAllDownloads)
@@ -58,10 +60,8 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin != "" && !isAllowedOrigin(origin, r.Host) {
-			if r.Method == http.MethodOptions {
-				writeError(w, http.StatusForbidden, errors.New("不允许的请求来源"))
-				return
-			}
+			writeError(w, http.StatusForbidden, errors.New("不允许的请求来源"))
+			return
 		} else if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
@@ -170,6 +170,40 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+// resolveLink previews one single-episode page or the full series catalog.
+func (s *Server) resolveLink(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	series, err := s.cctv.ResolveLink(ctx, r.URL.Query().Get("url"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, series)
+}
+
+// addDownloads creates ad-hoc downloads without creating a subscription.
+// The selected episode URLs are checked against a freshly resolved CCTV catalog.
+func (s *Server) addDownloads(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		SourceURL         string   `json:"sourceUrl"`
+		EpisodeURLs       []string `json:"episodeUrls"`
+		StorageCategoryID string   `json:"storageCategoryId"`
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	added, skipped, err := s.manager.QueueEpisodes(ctx, input.SourceURL, input.EpisodeURLs, input.StorageCategoryID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]int{"added": added, "skipped": skipped})
 }
 
 func (s *Server) subscriptions(w http.ResponseWriter, _ *http.Request) {

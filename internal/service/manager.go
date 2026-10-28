@@ -172,6 +172,11 @@ func (m *Manager) DeleteCategory(id string) error {
 				return errors.New("这个分类仍有订阅，不能删除")
 			}
 		}
+		for _, task := range state.Downloads {
+			if task.StorageCategoryID == id && task.Status != "cancelled" && task.Status != "failed" {
+				return errors.New("这个分类仍有直接下载任务，不能删除")
+			}
+		}
 		categories := state.Categories[:0]
 		for _, category := range state.Categories {
 			if category.ID != id {
@@ -229,6 +234,102 @@ func (m *Manager) AddSubscription(ctx context.Context, rawURL, storageCategoryID
 	}
 	m.Notify()
 	return sub, nil
+}
+
+// QueueEpisodes adds only explicitly selected catalog entries, without a subscription.
+// Validate the selection against fresh CCTV metadata so callers cannot enqueue
+// arbitrary URLs or overwrite storage paths.
+func (m *Manager) QueueEpisodes(ctx context.Context, rawURL string, chosenURLs []string, storageCategoryID string) (int, int, error) {
+	if len(chosenURLs) == 0 || len(chosenURLs) > 200 {
+		return 0, 0, errors.New("请选择 1 到 200 集进行下载")
+	}
+	if !categoryExists(m.store.Snapshot().Categories, storageCategoryID) {
+		return 0, 0, errors.New("请选择有效的保存分类")
+	}
+	series, err := m.cctv.ResolveLink(ctx, rawURL)
+	if err != nil {
+		return 0, 0, err
+	}
+	allowed := make(map[string]model.Episode, len(series.Episodes))
+	for _, episode := range series.Episodes {
+		// Only actual CCTV video pages are valid, even when a page embeds
+		// user-controlled or third-party URLs.
+		u, parseErr := url.Parse(episode.PageURL)
+		if parseErr != nil || u.Hostname() != "tv.cctv.com" || (u.Scheme != "https" && u.Scheme != "http") || u.Port() != "" {
+			continue
+		}
+		allowed[episode.PageURL] = episode
+	}
+	selection := make([]model.Episode, 0, len(chosenURLs))
+	seen := make(map[string]bool, len(chosenURLs))
+	skipped := 0
+	for _, pageURL := range chosenURLs {
+		episode, ok := allowed[pageURL]
+		if !ok {
+			return 0, 0, errors.New("所选单集不属于该央视节目，请重新解析链接")
+		}
+		if seen[pageURL] {
+			skipped++
+			continue
+		}
+		seen[pageURL] = true
+		selection = append(selection, episode)
+	}
+	added := 0
+	now := time.Now().Format(time.RFC3339)
+	err = m.store.Update(func(state *model.State) error {
+		if !categoryExists(state.Categories, storageCategoryID) {
+			return errors.New("所选保存分类已不存在")
+		}
+		episodeURLs := make(map[string]string, len(state.Episodes))
+		for _, episode := range state.Episodes {
+			episodeURLs[episode.ID] = episode.PageURL
+		}
+		existingURLs := make(map[string]bool)
+		for _, task := range state.Downloads {
+			if task.Status == "failed" || task.Status == "cancelled" {
+				continue
+			}
+			pageURL := task.PageURL
+			if pageURL == "" {
+				pageURL = episodeURLs[task.EpisodeID]
+			}
+			if pageURL != "" {
+				existingURLs[pageURL] = true
+			}
+		}
+		tasks := make([]model.DownloadTask, 0, len(selection))
+		for _, episode := range selection {
+			if existingURLs[episode.PageURL] {
+				skipped++
+				continue
+			}
+			existingURLs[episode.PageURL] = true
+			poster := episode.Image
+			if poster == "" {
+				poster = series.Poster
+			}
+			task := model.DownloadTask{
+				ID: newID("task"), Title: episode.Title, SeriesTitle: series.Title,
+				Poster: poster, PageURL: episode.PageURL,
+				StorageCategoryID: storageCategoryID, Status: "queued", CreatedAt: now,
+			}
+			if state.Settings.DownloadsPaused {
+				task.Status = "paused"
+			}
+			tasks = append(tasks, task)
+		}
+		added = len(tasks)
+		state.Downloads = append(tasks, state.Downloads...)
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	if added > 0 {
+		m.Notify()
+	}
+	return added, skipped, nil
 }
 
 func (m *Manager) CheckSubscription(ctx context.Context, id string) error {
@@ -586,14 +687,18 @@ func (m *Manager) runTask(ctx context.Context, id string) {
 			break
 		}
 	}
+	if task.SubscriptionID == "" && task.PageURL != "" {
+		episode = model.Episode{PageURL: task.PageURL, Title: task.Title, Image: task.Poster}
+		sub = model.Subscription{Title: task.SeriesTitle, StorageCategoryID: task.StorageCategoryID}
+	}
 	for _, item := range snapshot.Categories {
 		if item.ID == sub.StorageCategoryID {
 			category = item
 			break
 		}
 	}
-	if episode.ID == "" || sub.ID == "" {
-		m.failTask(id, errors.New("下载任务关联的剧集数据不存在"))
+	if episode.PageURL == "" || sub.Title == "" {
+		m.failTask(id, errors.New("下载任务关联的视频数据不存在"))
 		return
 	}
 	if category.ID == "" || strings.TrimSpace(category.DownloadPath) == "" {
@@ -1257,7 +1362,7 @@ func resolveURL(baseURL, ref string) string {
 }
 
 func newTask(sub model.Subscription, episode model.Episode, now string) model.DownloadTask {
-	return model.DownloadTask{ID: newID("task"), SubscriptionID: sub.ID, EpisodeID: episode.ID, Title: episode.Title, SeriesTitle: sub.Title, Poster: episode.Image, Status: "queued", CreatedAt: now}
+	return model.DownloadTask{ID: newID("task"), SubscriptionID: sub.ID, EpisodeID: episode.ID, Title: episode.Title, SeriesTitle: sub.Title, Poster: episode.Image, PageURL: episode.PageURL, Status: "queued", CreatedAt: now}
 }
 
 func recountDownloaded(state *model.State, subID string) {

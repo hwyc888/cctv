@@ -48,7 +48,16 @@ type SearchResult = {
   category?: string;
   region?: string;
   episodeCount?: number;
+  isSingle?: boolean;
 };
+type Episode = {
+  number: number;
+  title: string;
+  pageUrl: string;
+  image?: string;
+  publishedAt?: string;
+};
+type SeriesPreview = SearchResult & { episodes: Episode[] };
 type Subscription = SearchResult & {
   id: string;
   storageCategoryId: string;
@@ -76,6 +85,7 @@ type DownloadTask = {
   speed?: string;
   filePath?: string;
   videoQuality?: string;
+  pageUrl?: string;
   error?: string;
   createdAt: string;
   completedAt?: string;
@@ -145,6 +155,10 @@ export default function Home() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [preview, setPreview] = useState<SeriesPreview | null>(null);
+  const [selectedEpisodeURLs, setSelectedEpisodeURLs] = useState<string[]>([]);
+  const [resolvingURL, setResolvingURL] = useState<string | null>(null);
+  const [queueBusy, setQueueBusy] = useState(false);
   const [adding, setAdding] = useState<SearchResult | null>(null);
   const [addBusy, setAddBusy] = useState(false);
   const [downloadExisting, setDownloadExisting] = useState(false);
@@ -196,19 +210,79 @@ export default function Home() {
 	return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [loadState]);
 
+  function showEpisodePicker(series: SeriesPreview) {
+    setPreview(series);
+    const existing = new Set(state.downloads.filter((task) => task.status !== "failed" && task.status !== "cancelled").map((task) => task.pageUrl));
+    const available = series.episodes.filter((episode) => !existing.has(episode.pageUrl));
+    setSelectedEpisodeURLs(series.isSingle ? available.slice(0, 1).map((episode) => episode.pageUrl) : []);
+    setSelectedCategoryID((current) => state.categories.some((category) => category.id === current) ? current : (state.categories[0]?.id ?? ""));
+  }
+
+  async function openEpisodePicker(sourceURL: string) {
+    setResolvingURL(sourceURL);
+    try {
+      const series = await api<SeriesPreview>(`/api/resolve?url=${encodeURIComponent(sourceURL)}`);
+      showEpisodePicker(series);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "无法读取选集", "error");
+    } finally {
+      setResolvingURL(null);
+    }
+  }
+
   async function runSearch(event?: FormEvent) {
     event?.preventDefault();
     if (!query.trim()) return;
+    const value = query.trim();
     setSearching(true);
     setSearched(true);
+    setResults([]);
     try {
-      const data = await api<{ results: SearchResult[] }>(`/api/search?q=${encodeURIComponent(query.trim())}`);
-      setResults(data.results);
+      if (/^https?:\/\//i.test(value)) {
+        const series = await api<SeriesPreview>(`/api/resolve?url=${encodeURIComponent(value)}`);
+        setResults([series]);
+        showEpisodePicker(series);
+      } else {
+        const data = await api<{ results: SearchResult[] }>(`/api/search?q=${encodeURIComponent(value)}`);
+        setResults(data.results);
+      }
       setConnected(true);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "搜索失败", "error");
+      notify(error instanceof Error ? error.message : "解析或搜索失败", "error");
     } finally {
       setSearching(false);
+    }
+  }
+
+  function toggleEpisode(pageURL: string) {
+    setSelectedEpisodeURLs((current) => current.includes(pageURL) ? current.filter((url) => url !== pageURL) : current.length < 200 ? [...current, pageURL] : current);
+  }
+
+  async function queueSelectedEpisodes() {
+    if (!preview || selectedEpisodeURLs.length === 0 || !selectedCategoryID) return;
+    setQueueBusy(true);
+    try {
+      const response = await api<{ added: number; skipped: number }>("/api/downloads", {
+        method: "POST",
+        body: JSON.stringify({
+          sourceUrl: preview.sourceUrl,
+          episodeUrls: selectedEpisodeURLs,
+          storageCategoryId: selectedCategoryID,
+        }),
+      });
+      if (response.added > 0) {
+        notify(`已加入 ${response.added} 集下载队列${response.skipped ? `，跳过 ${response.skipped} 集重复任务` : ""}`);
+        setPreview(null);
+        setTab("downloads");
+        await loadState(true);
+      } else {
+        notify("所选集数已在下载队列或已完成，无需重复添加");
+        await loadState(true);
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "加入下载任务失败", "error");
+    } finally {
+      setQueueBusy(false);
     }
   }
 
@@ -332,11 +406,13 @@ export default function Home() {
   }
 
   const subscribedURLs = useMemo(() => new Set(state.subscriptions.map((item) => item.sourceUrl)), [state.subscriptions]);
+  const existingEpisodeURLs = useMemo(() => new Set(state.downloads.filter((task) => task.status !== "cancelled" && task.status !== "failed").map((task) => task.pageUrl)), [state.downloads]);
+  const availableEpisodes = useMemo(() => preview?.episodes.filter((episode) => !existingEpisodeURLs.has(episode.pageUrl)) ?? [], [preview, existingEpisodeURLs]);
   const visibleTasks = useMemo(() => taskFilter === "all" ? state.downloads : state.downloads.filter((task) => task.status === taskFilter), [state.downloads, taskFilter]);
   const orderedCategories = useMemo(() => flattenCategories(state.categories), [state.categories]);
   const categoryNames = useMemo(() => new Map(orderedCategories.map((category) => [category.id, category.label])), [orderedCategories]);
   const pageMeta = {
-    search: ["发现剧集", "搜索央视网节目，或直接粘贴一个剧集主页链接"],
+    search: ["链接下载 / 发现节目", "粘贴央视单集或节目链接，选择要下载的集数"],
     subscriptions: ["我的订阅", `${state.subscriptions.length} 个剧集正在持续追踪`],
     downloads: ["下载任务", state.settings.downloadsPaused ? `${state.stats.paused} 个任务已暂停` : `${state.stats.downloading} 个进行中 · ${state.stats.queued} 个等待中`],
     settings: ["系统设置", "管理分类路径、更新频率和并发任务"],
@@ -347,7 +423,7 @@ export default function Home() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark"><Tv2 size={22} /></span><span><b>剧栈</b><small>CCTV 自动追剧</small></span></div>
         <nav className="nav-list" aria-label="主导航">
-          <button className={tab === "search" ? "active" : ""} onClick={() => setTab("search")}><Search size={18} /><span className="nav-label">发现剧集</span></button>
+          <button className={tab === "search" ? "active" : ""} onClick={() => setTab("search")}><Search size={18} /><span className="nav-label">选集下载</span></button>
           <button className={tab === "subscriptions" ? "active" : ""} onClick={() => setTab("subscriptions")}><BellRing size={18} /><span className="nav-label">我的订阅</span><span className="nav-count">{state.subscriptions.length}</span></button>
           <button className={tab === "downloads" ? "active" : ""} onClick={() => setTab("downloads")}><HardDriveDownload size={18} /><span className="nav-label">下载任务</span>{state.stats.downloading > 0 && <span className="nav-live">{state.stats.downloading}</span>}</button>
           <button className={tab === "settings" ? "active" : ""} onClick={() => { setTab("settings"); setSettingsDraft(state.settings); }}><Settings size={18} /><span className="nav-label">系统设置</span></button>
@@ -373,16 +449,16 @@ export default function Home() {
         {tab === "search" && (
           <section className="page-content search-page">
             <div className="search-hero">
-              <div className="eyebrow"><span /><b>央视节目一站式订阅</b></div>
-              <h2>找到想追的剧，<br /><em>剩下的交给剧栈。</em></h2>
-              <p>从央视网搜索节目，自动识别选集；订阅后有新内容就会进入下载队列。</p>
+              <div className="eyebrow"><span /><b>央视网 · 链接下载</b></div>
+              <h2>粘贴视频链接，<br /><em>选好集数就下载。</em></h2>
+              <p>支持央视单集播放页和剧集主页，无需先订阅。也能搜索剧名，选择几集下载，想追更时再订阅。</p>
               <form className="search-box" onSubmit={runSearch}>
                 <Search size={21} />
-                <input aria-label="搜索剧集" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入剧名，或粘贴 tv.cctv.com 剧集链接" />
+                <input aria-label="搜索剧集" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="粘贴 https://tv.cctv.com/... 单集或节目链接，或输入剧名" />
                 {query && <button type="button" className="clear-search" onClick={() => setQuery("")} aria-label="清空搜索"><X size={16} /></button>}
-                <button className="search-submit" disabled={searching || !connected}>{searching ? <LoaderCircle className="spin" size={18} /> : <Search size={18} />}{searching ? "搜索中" : "搜索"}</button>
+                <button className="search-submit" disabled={searching || !connected}>{searching ? <LoaderCircle className="spin" size={18} /> : <Search size={18} />}{searching ? "正在解析" : /^https?:\/\//i.test(query.trim()) ? "解析链接" : "搜索"}</button>
               </form>
-              <div className="search-hints"><span>试试：</span>{["汪汪队立大功", "航拍中国", "典籍里的中国"].map((hint) => <button key={hint} onClick={() => { setQuery(hint); }}>{hint}</button>)}</div>
+              <div className="search-hints"><span>按剧名搜索：</span>{["汪汪队立大功", "航拍中国", "典籍里的中国"].map((hint) => <button key={hint} onClick={() => { setQuery(hint); }}>{hint}</button>)}</div>
             </div>
 
             {(searched || results.length > 0) && <div className="results-section">
@@ -394,10 +470,10 @@ export default function Home() {
                   <div className="poster-wrap"><img src={result.poster} alt={`${result.title}海报`} /><span className="quality-tag">CCTV</span></div>
                   <div className="result-body"><div className="result-meta"><span>{result.year || "央视节目"}</span>{result.category && <><i /> <span>{result.category}</span></>}{result.episodeCount ? <><i /><span>共 {result.episodeCount} 集</span></> : null}</div>
                     <h4>{result.title}</h4><p>{result.description || "暂无节目简介"}</p>
-                    <div className="result-actions"><button className={`subscribe-button ${subscribed ? "subscribed" : ""}`} disabled={subscribed} onClick={() => { setAdding(result); setDownloadExisting(false); setSelectedCategoryID(orderedCategories[0]?.id ?? ""); }}>{subscribed ? <Check size={17} /> : <Plus size={17} />}{subscribed ? "已订阅" : "添加订阅"}</button><a href={result.sourceUrl} target="_blank" rel="noreferrer" title="在央视网查看"><ChevronRight size={19} /></a></div>
+                    <div className="result-actions"><button className="subscribe-button direct-download" disabled={resolvingURL === result.sourceUrl} onClick={() => openEpisodePicker(result.sourceUrl)}>{resolvingURL === result.sourceUrl ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}{resolvingURL === result.sourceUrl ? "正在解析" : result.isSingle ? "下载本集" : "选集下载"}</button>{!result.isSingle && <button className={`follow-button ${subscribed ? "subscribed" : ""}`} disabled={subscribed} onClick={() => { setAdding(result); setDownloadExisting(false); setSelectedCategoryID(orderedCategories[0]?.id ?? ""); }}>{subscribed ? <Check size={14} /> : <BellRing size={14} />}{subscribed ? "已订阅" : "订阅追更"}</button>}<a href={result.sourceUrl} target="_blank" rel="noreferrer" title="在央视网查看"><ChevronRight size={19} /></a></div>
                   </div>
                 </article>;
-              })}</div> : <div className="empty-state"><Search size={30} /><h3>没有找到匹配的剧集</h3><p>换个关键词，或直接粘贴央视网的剧集主页链接。</p></div>}
+              })}</div> : <div className="empty-state"><Search size={30} /><h3>没有找到匹配的剧集</h3><p>换个关键词，或直接粘贴 tv.cctv.com 的单集、剧集链接。</p></div>}
             </div>}
           </section>
         )}
@@ -423,7 +499,7 @@ export default function Home() {
           {visibleTasks.length ? <div className="task-list">{visibleTasks.map((task) => <article className="task-row" key={task.id}><div className="task-thumb"><img src={task.poster} alt="" />{task.status === "completed" && <span><Check size={14} /></span>}</div><div className="task-main"><div className="task-heading"><div><h3>{task.title}</h3><p>{task.seriesTitle}</p></div><span className={`task-status ${task.status}`}>{task.status === "downloading" && <LoaderCircle className="spin" size={13} />}{statusText(task.status)}</span></div>
             {(task.status === "downloading" || task.status === "queued" || task.status === "paused") && <div className="task-progress"><div className="progress-track"><span style={{ width: `${task.progress}%` }} /></div><div><b>{task.status === "queued" ? "等待可用下载槽" : task.status === "paused" ? "已暂停，恢复后重新开始" : `${Math.round(task.progress)}%`}</b><span>{task.speed || (task.status === "queued" || task.status === "paused" ? "" : "正在连接资源…")}</span></div></div>}
             {task.status === "failed" && <div className="task-error">{task.error}</div>}{task.status === "completed" && <div className="task-file"><FolderOpen size={14} /><span title={task.filePath}>{task.filePath}</span>{task.videoQuality && <b title="实际保存的视频画质"> · {task.videoQuality}</b>}</div>}
-          </div><div className="task-actions">{task.status === "completed" && task.filePath && <><button className="retry" title="重新下载并修复之前损坏的视频" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重新下载</button><button className="open-folder" title="在运行程序的电脑上打开保存目录" disabled={openingDirectoryID === task.id} onClick={() => openDownloadDirectory(task)}>{openingDirectoryID === task.id ? <LoaderCircle className="spin" size={15} /> : <FolderOpen size={15} />}打开目录</button><button className="play-video" title="在线播放已下载视频" onClick={() => setPlayingTask(task)}><Play size={15} />播放</button></>}{(task.status === "queued" || task.status === "downloading" || task.status === "paused") && <button title="取消任务" onClick={() => taskAction(task, "cancel")}><X size={17} /></button>}{(task.status === "failed" || task.status === "cancelled") && <button className="retry" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重试</button>}</div></article>)}</div> : <div className="empty-state large"><HardDriveDownload size={32} /><h3>这里暂时没有任务</h3><p>新增订阅或等待剧集更新，下载任务会显示在这里。</p></div>}
+          </div><div className="task-actions">{task.status === "completed" && task.filePath && <><button className="retry" title="重新下载并修复之前损坏的视频" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重新下载</button><button className="open-folder" title="在运行程序的电脑上打开保存目录" disabled={openingDirectoryID === task.id} onClick={() => openDownloadDirectory(task)}>{openingDirectoryID === task.id ? <LoaderCircle className="spin" size={15} /> : <FolderOpen size={15} />}打开目录</button><button className="play-video" title="在线播放已下载视频" onClick={() => setPlayingTask(task)}><Play size={15} />播放</button></>}{(task.status === "queued" || task.status === "downloading" || task.status === "paused") && <button title="取消任务" onClick={() => taskAction(task, "cancel")}><X size={17} /></button>}{(task.status === "failed" || task.status === "cancelled") && <button className="retry" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重试</button>}</div></article>)}</div> : <div className="empty-state large"><HardDriveDownload size={32} /><h3>这里暂时没有任务</h3><p>去“选集下载”粘贴链接并勾选集数，或订阅节目自动下载。</p></div>}
         </section>}
 
         {tab === "settings" && <section className="page-content settings-grid">
@@ -449,6 +525,44 @@ export default function Home() {
         </section>}
       </main>
 
+      {preview && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !queueBusy) setPreview(null); }}>
+        <div className="episode-modal" role="dialog" aria-modal="true" aria-labelledby="episode-picker-title">
+          <header className="episode-modal-header">
+            {preview.poster ? <img src={preview.poster} alt="" /> : <span className="episode-poster-placeholder"><Tv2 size={26} /></span>}
+            <div className="episode-modal-title">
+              <span className="modal-kicker"><Download size={14} />{preview.isSingle ? "单集直接下载" : "选择要下载的剧集"}</span>
+              <h2 id="episode-picker-title">{preview.title}</h2>
+              <p>{preview.episodes.length} 集可选 · 下载后可在任务列表直接播放</p>
+            </div>
+            <button className="episode-modal-close" aria-label="关闭选集" title="关闭" onClick={() => setPreview(null)} disabled={queueBusy}><X size={19} /></button>
+          </header>
+          <div className="episode-picker-toolbar">
+            <strong>选集列表 <span>已选 {selectedEpisodeURLs.length} / {preview.episodes.length}</span></strong>
+            {!preview.isSingle && <div>
+              <button onClick={() => setSelectedEpisodeURLs(availableEpisodes.slice(0, 200).map((ep) => ep.pageUrl))}>全选{availableEpisodes.length > 200 ? "前 200 集" : ""}</button>
+              <button onClick={() => setSelectedEpisodeURLs(availableEpisodes.length ? [availableEpisodes[availableEpisodes.length - 1].pageUrl] : [])}>只选最新</button>
+              <button onClick={() => setSelectedEpisodeURLs([])}>清空</button>
+            </div>}
+          </div>
+          <div className="episode-picker-list">
+            {preview.episodes.map((episode) => {
+              const exists = existingEpisodeURLs.has(episode.pageUrl);
+              const selected = selectedEpisodeURLs.includes(episode.pageUrl);
+              return <label key={episode.pageUrl} className={`episode-picker-item ${selected ? "selected" : ""} ${exists ? "already-queued" : ""}`}>
+                <input type="checkbox" checked={selected} disabled={exists || queueBusy} onChange={() => toggleEpisode(episode.pageUrl)} />
+                <span className="episode-index">{episode.number}</span>
+                <span className="episode-title">{episode.title}{episode.publishedAt && <small>{episode.publishedAt}</small>}</span>
+                {exists ? <span className="episode-exists"><Check size={13} />已加入</span> : selected ? <Check size={17} className="episode-checked" /> : null}
+              </label>;
+            })}
+          </div>
+          <footer className="episode-picker-footer">
+            <label>保存到 <select value={selectedCategoryID} onChange={(event) => setSelectedCategoryID(event.target.value)} disabled={queueBusy}>{orderedCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select></label>
+            <span className="episode-picker-path">{state.categories.find((category) => category.id === selectedCategoryID)?.downloadPath || "尚未设置保存目录"}</span>
+            <div className="episode-picker-buttons"><button className="cancel-button" onClick={() => setPreview(null)} disabled={queueBusy}>取消</button><button className="confirm-button" disabled={queueBusy || !selectedCategoryID || selectedEpisodeURLs.length === 0} onClick={queueSelectedEpisodes}>{queueBusy ? <LoaderCircle className="spin" size={17} /> : <Download size={17} />}{queueBusy ? "正在加入队列" : `下载选中 ${selectedEpisodeURLs.length} 集`}</button></div>
+          </footer>
+        </div>
+      </div>}
       {adding && <div className="modal-backdrop"><div className="add-modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><button className="modal-close" onClick={() => setAdding(null)} disabled={addBusy}><X size={18} /></button><img src={adding.poster} alt="" /><div className="modal-copy"><span className="modal-kicker"><BellRing size={14} />新订阅</span><h2 id="add-title">{adding.title}</h2><p>订阅后系统会每 {state.settings.pollIntervalMinutes} 分钟检查一次，新剧集将自动进入下载队列。</p><label className="modal-category">保存分类<select value={selectedCategoryID} onChange={(event) => setSelectedCategoryID(event.target.value)}>{orderedCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select><small>{state.categories.find((category) => category.id === selectedCategoryID)?.downloadPath || "请先在设置中创建分类"}</small></label><div className="check-row"><input id="download-existing" type="checkbox" checked={downloadExisting} onChange={(event) => setDownloadExisting(event.target.checked)} /><label htmlFor="download-existing"><b>同时下载已有剧集</b><small>{adding.episodeCount ? `将加入 ${adding.episodeCount} 个下载任务` : "已有选集会加入下载队列"}</small></label></div><div className="modal-actions"><button className="cancel-button" onClick={() => setAdding(null)} disabled={addBusy}>取消</button><button className="confirm-button" onClick={confirmAdd} disabled={addBusy || !selectedCategoryID}>{addBusy ? <LoaderCircle className="spin" size={17} /> : <BellRing size={17} />}{addBusy ? "正在添加" : "确认订阅"}</button></div></div></div></div>}
       {playingTask && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPlayingTask(null); }}><div className="video-modal" role="dialog" aria-modal="true" aria-label={`播放 ${playingTask.title}`}><div className="video-modal-header"><div><strong>{playingTask.title}</strong><small>{playingTask.seriesTitle}{playingTask.videoQuality ? ` · ${playingTask.videoQuality}` : ""}</small></div><button type="button" title="关闭播放器" aria-label="关闭播放器" onClick={() => setPlayingTask(null)}><X size={20} /></button></div><video key={playingTask.id} src={`${API_BASE}/api/downloads/${encodeURIComponent(playingTask.id)}/video`} controls autoPlay playsInline preload="metadata" onError={() => notify("播放失败：请检查文件是否存在以及浏览器是否支持该视频编码", "error")} /><p>直接播放本机保存的 MP4，不会重新下载。若没有画面，可尝试在下载页面重新下载该集。</p></div></div>}
       {toast && <div className={`toast ${toast.type}`}><span>{toast.type === "ok" ? <CheckCircle2 size={18} /> : <X size={18} />}</span>{toast.text}</div>}

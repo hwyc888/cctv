@@ -172,3 +172,56 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .video-modal video { display: block; width: 100%; max-height: 70vh; aspect-ratio: 16 / 9; object-fit: contain; background: #0d1216; }
 .video-modal > p { margin: 0; padding: 13px 20px 17px; font-size: 10px; color: #849097; }
 @media (max-width: 560px) { .task-actions { max-width: 160px; } .task-actions > button { width: 100%; } .video-modal-header { padding: 12px; } }
+
+/* Direct link download: compact hero, distinct download action, selectable episodes. */
+.search-hero { padding-top: 37px; padding-bottom: 34px; }
+.search-hero h2 { font-size: clamp(28px, 3.2vw, 42px); margin-top: 13px; margin-bottom: 9px; }
+.search-hero > p { max-width: 790px; }
+.search-box { margin-top: 22px; }
+.result-actions { align-items: center; flex-wrap: wrap; }
+.result-actions .direct-download { flex: 1 1 auto; min-width: 110px; }
+.result-actions .follow-button { display: flex; align-items: center; justify-content: center; gap: 5px; height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid #d7dcd8; background: #fff; color: #68777e; cursor: pointer; font-weight: 650; font-size: 10px; white-space: nowrap; }
+.result-actions .follow-button:hover { border-color: #d7ac9c; color: #e35436; }
+.result-actions .follow-button.subscribed { color: #288260; background: #eaf6f0; cursor: default; }
+.episode-modal { width: min(790px, 100%); max-height: min(90vh, 850px); min-height: 330px; display: flex; flex-direction: column; overflow: hidden; border-radius: 17px; background: #fff; box-shadow: 0 30px 80px rgba(0,0,0,.3); }
+.episode-modal-header { display: flex; gap: 18px; align-items: center; position: relative; padding: 22px 25px 18px; border-bottom: 1px solid #edf0ec; }
+.episode-modal-header > img, .episode-poster-placeholder { width: 66px; height: 86px; border-radius: 10px; object-fit: cover; background: #eef1ef; flex: 0 0 auto; }
+.episode-poster-placeholder { display: grid; place-items: center; color: #9ca8ab; }
+.episode-modal-title { flex: 1; min-width: 0; }
+.episode-modal-title h2 { margin: 7px 0 5px; font-size: 20px; line-height: 1.35; overflow-wrap: anywhere; }
+.episode-modal-title p { margin: 0; font-size: 12px; color: #849096; }
+.episode-modal-close { width: 33px; height: 33px; align-self: flex-start; border: 0; border-radius: 9px; color: #6a7378; background: #f2f4f1; cursor: pointer; display: grid; place-items: center; flex: 0 0 auto; }
+.episode-picker-toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 15px 24px 12px; }
+.episode-picker-toolbar strong { font-size: 13px; color: #24333e; }
+.episode-picker-toolbar strong span { margin-left: 7px; font-size: 11px; color: #e3553a; }
+.episode-picker-toolbar > div { display: flex; gap: 6px; flex-wrap: wrap; }
+.episode-picker-toolbar button { border: 1px solid #e5e8e4; border-radius: 7px; padding: 7px 10px; background: #f8faf8; color: #4c5b66; font-size: 11px; cursor: pointer; }
+.episode-picker-toolbar button:hover { border-color: #e65a3b; color: #e65a3b; }
+.episode-picker-list { overflow-y: auto; display: grid; align-content: start; gap: 7px; padding: 0 24px 20px; min-height: 80px; flex: 1; }
+.episode-picker-item { cursor: pointer; display: flex; align-items: center; gap: 11px; border: 1px solid #e8ece8; padding: 11px 13px; border-radius: 9px; background: #fff; min-width: 0; transition: border-color .15s, background .15s; }
+.episode-picker-item:hover:not(.already-queued) { border-color: #e3aa98; }
+.episode-picker-item.selected { border-color: #eeb4a3; background: #fff6f2; }
+.episode-picker-item.already-queued { opacity: .65; cursor: default; background: #f4f5f3; }
+.episode-picker-item input { width: 17px; height: 17px; flex: 0 0 auto; accent-color: #eb5536; }
+.episode-index { flex: 0 0 auto; min-width: 30px; padding: 5px 7px; border-radius: 6px; text-align: center; font-size: 12px; font-weight: 700; background: #f4f6f4; color: #626d73; }
+.episode-title { flex: 1; min-width: 0; font-size: 12px; color: #1e2e38; overflow-wrap: anywhere; line-height: 1.5; }
+.episode-title small { display: block; color: #8f999c; font-size: 10px; margin-top: 2px; }
+.episode-exists { display: flex; align-items: center; gap: 4px; white-space: nowrap; color: #539476; font-size: 10px; }
+.episode-checked { color: #e6593b; flex: 0 0 auto; }
+.episode-picker-footer { border-top: 1px solid #eef0ed; padding: 15px 24px 19px; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; background: #fbfcfa; }
+.episode-picker-footer label { display: flex; gap: 9px; align-items: center; font-size: 12px; font-weight: 700; color: #47525b; }
+.episode-picker-footer select { max-width: 175px; height: 38px; border: 1px solid #dde2dd; background: #fff; border-radius: 7px; padding: 0 9px; font-size: 11px; color: #22303b; }
+.episode-picker-path { flex: 1; min-width: 70px; font-size: 10px; color: #899298; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.episode-picker-buttons { display: flex; gap: 9px; flex: 0 0 auto; }
+.episode-picker-buttons > button { min-height: 38px; }
+@media (max-width: 650px) {
+  .episode-modal { max-height: 94vh; }
+  .episode-modal-header { padding: 15px; gap: 11px; }
+  .episode-modal-header > img, .episode-poster-placeholder { width: 45px; height: 61px; }
+  .episode-modal-title h2 { font-size: 16px; }
+  .episode-picker-list { padding: 0 13px 14px; }
+  .episode-picker-toolbar { padding: 12px 13px; }
+  .episode-picker-footer { padding: 12px 13px; }
+  .episode-picker-buttons { width: 100%; }
+  .episode-picker-buttons > button:last-child { flex: 1; }
+}
