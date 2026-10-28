@@ -329,6 +329,29 @@ export default function Home() {
     setSelectedCategoryID((current) => state.categories.some((category) => category.id === current) ? current : (state.categories[0]?.id ?? ""));
   }
 
+  function startLibrarySubscription(program: LibraryProgram) {
+    const sourceUrl = program.sourceUrl?.trim();
+    if (!sourceUrl) {
+      notify("央视目录没有提供可用于自动追更的节目主页链接，暂时无法直接订阅。请先打开选集，或通过“链接与搜索”粘贴节目主页链接。", "error");
+      return;
+    }
+    const existing = state.subscriptions.find((item) => item.sourceUrl === sourceUrl);
+    if (existing) {
+      setTab("subscriptions");
+      void openSubscriptionManager(existing);
+      return;
+    }
+    setAdding({
+      title: program.title,
+      sourceUrl,
+      poster: program.poster,
+      description: program.description,
+      isSingle: false,
+    });
+    setDownloadExisting(false);
+    setSelectedCategoryID(orderedCategories[0]?.id ?? "");
+  }
+
   async function openLibraryProgram(program: LibraryProgram, page = 1) {
     setResolvingLibraryID(program.id);
     try {
@@ -815,10 +838,25 @@ export default function Home() {
                 <article className="library-program-card" key={`${program.kind}-${program.id}`}>
                   <div className="library-program-poster">{program.poster ? <img src={program.poster} alt="" loading="lazy" /> : <Tv2 size={30} />}<span>CCTV</span></div>
                   <div className="library-program-info"><h4 title={program.title}>{program.title}</h4><p title={program.description}>{program.description || "来自央视网节目库"}</p>
-                    <button type="button" onClick={() => openLibraryProgram(program)} disabled={resolvingLibraryID !== null}>
-                      {resolvingLibraryID === program.id ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}
-                      {resolvingLibraryID === program.id ? "读取选集…" : "查看选集"}
-                    </button>
+                    <div className="library-program-actions">
+                      <button type="button" className="library-browse-button" onClick={() => openLibraryProgram(program)} disabled={resolvingLibraryID !== null}>
+                        {resolvingLibraryID === program.id ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}
+                        {resolvingLibraryID === program.id ? "读取选集…" : "查看选集"}
+                      </button>
+                      {(() => {
+                        const subscribed = !!program.sourceUrl && state.subscriptions.some((item) => item.sourceUrl === program.sourceUrl);
+                        return <button
+                          type="button"
+                          className={`library-subscribe-button ${subscribed ? "subscribed" : ""}`}
+                          title={subscribed ? "已订阅，点击管理每集下载" : program.sourceUrl ? "订阅该节目，自动追更并加入订阅管理" : "央视目录没有提供节目主页链接，暂时无法直接订阅"}
+                          onClick={() => startLibrarySubscription(program)}
+                          disabled={!program.sourceUrl}
+                        >
+                          {subscribed ? <Check size={15} /> : <BellRing size={15} />}
+                          {subscribed ? "已订阅" : program.sourceUrl ? "订阅追更" : "暂不可订阅"}
+                        </button>;
+                      })()}
+                    </div>
                   </div>
                 </article>)}</div>
               : <div className="empty-state large"><Tv2 size={30} /><h3>这一页暂时没有节目</h3><p>可以切换分类、频道，或返回上一页。</p></div>}
