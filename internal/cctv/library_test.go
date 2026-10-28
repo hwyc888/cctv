@@ -223,7 +223,7 @@ func TestLiveAnimationCatalogEpisodes(t *testing.T) {
 	if len(programs.Programs) < 8 {
 		t.Fatalf("CCTV program catalog unexpectedly short: %d", len(programs.Programs))
 	}
-	for _, program := range programs.Programs[:8] {
+	for _, program := range programs.Programs {
 		episodes, err := client.BrowseLibraryEpisodes(ctx, program.Kind, program.ID, 1)
 		if err != nil {
 			t.Fatalf("open %s: %v", program.Title, err)
