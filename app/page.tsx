@@ -464,16 +464,16 @@ export default function Home() {
     }
     const withFiles = selected.filter((task) => !!task.filePath).length;
     const prompt = ids.length === 1
-      ? `确定永久删除“${selected[0].title}”吗？${withFiles ? "\n这将同时删除电脑上保存的 MP4 文件。" : "\n这将删除下载任务记录。"}\n操作不可恢复。`
-      : `确定批量永久删除选中的 ${ids.length} 个任务吗？\n其中 ${withFiles} 个任务记录了本地视频文件，程序会同时将这些 MP4 从硬盘删除。\n此操作不可恢复。`;
+      ? `确定永久删除“${selected[0].title}”吗？${withFiles ? "\n这将同时删除电脑上保存的 MP4 文件。" : "\n这将删除下载任务记录。"}\n空的剧集目录也会自动清理；其他文件和分类根目录会保留。\n操作不可恢复。`
+      : `确定批量永久删除选中的 ${ids.length} 个任务吗？\n其中 ${withFiles} 个任务记录了本地视频文件，程序会同时将这些 MP4 从硬盘删除。\n空的剧集目录也会自动清理；其他文件和分类根目录会保留。\n此操作不可恢复。`;
     if (!window.confirm(prompt)) return;
     setDeletingTaskIDs(ids);
     try {
-      const result = await api<{ deleted: number; filesDeleted: number }>(
+      const result = await api<{ deleted: number; filesDeleted: number; directoriesDeleted: number }>(
         ids.length === 1 ? `/api/downloads/${encodeURIComponent(ids[0])}` : "/api/downloads/delete-batch",
         ids.length === 1 ? { method: "DELETE" } : { method: "POST", body: JSON.stringify({ ids }) },
       );
-      notify(`已永久删除 ${result.deleted} 条任务记录，实际删除 ${result.filesDeleted} 个本地 MP4 文件`);
+      notify(`已删除 ${result.deleted} 条任务、${result.filesDeleted} 个 MP4 文件，清理 ${result.directoriesDeleted ?? 0} 个空目录`);
       setSelectedTaskIDs((current) => current.filter((id) => !ids.includes(id)));
       if (playingTask && ids.includes(playingTask.id)) setPlayingTask(null);
       await loadState(true);
