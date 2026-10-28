@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"cctv-sub/internal/cctv"
@@ -156,7 +157,42 @@ func TestLiveAnimationHTTPSelection(t *testing.T) {
 			t.Fatalf("duplicate handling failed: %#v", stats)
 		}
 	}
-	if len(st.Snapshot().Downloads) != 1 || len(st.Snapshot().Subscriptions) != 0 {
-		t.Fatal("animation selection should create one ad hoc task and no subscription")
+	// Real pagination regression: this cartoon contains more than 100 videos.
+	programsResponse := httptest.NewRecorder()
+	handler.ServeHTTP(programsResponse, httptest.NewRequest(http.MethodGet, "/api/library/programs?kind=animation&page=1", nil))
+	var catalog cctv.LibraryPrograms
+	if programsResponse.Code != 200 || json.Unmarshal(programsResponse.Body.Bytes(), &catalog) != nil {
+		t.Fatalf("cannot retrieve real animation program page: %s", programsResponse.Body.String())
+	}
+	var rescueID string
+	for _, program := range catalog.Programs {
+		if strings.Contains(program.Title, "丛林救援队") {
+			rescueID = program.ID
+			break
+		}
+	}
+	if rescueID == "" {
+		t.Fatal("second-page regression series was not found")
+	}
+	nextResponse := httptest.NewRecorder()
+	handler.ServeHTTP(nextResponse, httptest.NewRequest(http.MethodGet, "/api/library/episodes?kind=animation&id="+rescueID+"&page=2", nil))
+	var next cctv.LibraryEpisodes
+	if nextResponse.Code != 200 || json.Unmarshal(nextResponse.Body.Bytes(), &next) != nil ||
+		next.Page != 2 || next.Total <= 100 || len(next.Episodes) == 0 || next.Episodes[0].Number != 101 {
+		t.Fatalf("second page did not return playable episodes: %d %s", nextResponse.Code, nextResponse.Body.String())
+	}
+	secondPayload, _ := json.Marshal(map[string]any{
+		"kind": "animation", "id": rescueID, "page": 2,
+		"programTitle": "丛林救援队 火速到达", "videoGuids": []string{next.Episodes[0].VideoGUID},
+		"storageCategoryId": st.Snapshot().Categories[0].ID,
+	})
+	secondResult := httptest.NewRecorder()
+	handler.ServeHTTP(secondResult, httptest.NewRequest(http.MethodPost, "/api/library/downloads", bytes.NewReader(secondPayload)))
+	if secondResult.Code != 201 {
+		t.Fatalf("cannot download a selected episode from page 2: %d %s", secondResult.Code, secondResult.Body.String())
+	}
+	t.Logf("HTTP second page verified: total=%d videos-on-page=%d", next.Total, len(next.Episodes))
+	if len(st.Snapshot().Downloads) != 2 || len(st.Snapshot().Subscriptions) != 0 {
+		t.Fatal("selection should create two ad hoc tasks, including one from the second page")
 	}
 }
