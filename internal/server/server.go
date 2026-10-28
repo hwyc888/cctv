@@ -59,6 +59,8 @@ func New(s *store.Store, client *cctv.Client, manager *service.Manager, logger *
 	mux.HandleFunc("POST /api/downloads/resume-all", server.resumeAllDownloads)
 	mux.HandleFunc("POST /api/downloads/{id}/retry", server.retryDownload)
 	mux.HandleFunc("POST /api/downloads/{id}/cancel", server.cancelDownload)
+	mux.HandleFunc("DELETE /api/downloads/{id}", server.deleteDownload)
+	mux.HandleFunc("POST /api/downloads/delete-batch", server.deleteDownloadsBatch)
 	mux.HandleFunc("GET /api/settings", server.settings)
 	mux.HandleFunc("PUT /api/settings", server.updateSettings)
 	return server.middleware(mux)

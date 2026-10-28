@@ -223,6 +223,8 @@ export default function Home() {
   const [editingCategoryID, setEditingCategoryID] = useState<string | null>(null);
   const [savingCategory, setSavingCategory] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [selectedTaskIDs, setSelectedTaskIDs] = useState<string[]>([]);
+  const [deletingTaskIDs, setDeletingTaskIDs] = useState<string[]>([]);
   const [toast, setToast] = useState<{ text: string; type: "ok" | "error" } | null>(null);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [playingTask, setPlayingTask] = useState<DownloadTask | null>(null);
@@ -445,6 +447,44 @@ export default function Home() {
     } catch (error) { notify(error instanceof Error ? error.message : "操作失败", "error"); }
   }
 
+  function toggleTaskSelection(id: string) {
+    setSelectedTaskIDs((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
+
+  async function deleteDownloads(ids: string[]) {
+    if (deletingTaskIDs.length || !ids.length) return;
+    const selected = state.downloads.filter((task) => ids.includes(task.id));
+    if (selected.length !== ids.length) {
+      notify("部分任务已经不存在，请刷新后重新选择", "error");
+      return;
+    }
+    if (selected.some((task) => task.status === "downloading")) {
+      notify("请先取消正在下载的任务，等待停止后再删除", "error");
+      return;
+    }
+    const withFiles = selected.filter((task) => !!task.filePath).length;
+    const prompt = ids.length === 1
+      ? `确定永久删除“${selected[0].title}”吗？${withFiles ? "\n这将同时删除电脑上保存的 MP4 文件。" : "\n这将删除下载任务记录。"}\n操作不可恢复。`
+      : `确定批量永久删除选中的 ${ids.length} 个任务吗？\n其中 ${withFiles} 个任务记录了本地视频文件，程序会同时将这些 MP4 从硬盘删除。\n此操作不可恢复。`;
+    if (!window.confirm(prompt)) return;
+    setDeletingTaskIDs(ids);
+    try {
+      const result = await api<{ deleted: number; filesDeleted: number }>(
+        ids.length === 1 ? `/api/downloads/${encodeURIComponent(ids[0])}` : "/api/downloads/delete-batch",
+        ids.length === 1 ? { method: "DELETE" } : { method: "POST", body: JSON.stringify({ ids }) },
+      );
+      notify(`已永久删除 ${result.deleted} 条任务记录，实际删除 ${result.filesDeleted} 个本地 MP4 文件`);
+      setSelectedTaskIDs((current) => current.filter((id) => !ids.includes(id)));
+      if (playingTask && ids.includes(playingTask.id)) setPlayingTask(null);
+      await loadState(true);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "删除未完成，请检查报错并刷新任务列表", "error");
+      await loadState(true);
+    } finally {
+      setDeletingTaskIDs([]);
+    }
+  }
+
   async function toggleAllDownloads() {
     setBulkBusy(true);
     const resume = state.settings.downloadsPaused;
@@ -519,6 +559,8 @@ export default function Home() {
   const existingEpisodeURLs = useMemo(() => new Set(state.downloads.filter((task) => task.status !== "cancelled" && task.status !== "failed").flatMap(taskKeys)), [state.downloads]);
   const availableEpisodes = useMemo(() => preview?.episodes.filter((episode) => !isEpisodeQueued(episode, existingEpisodeURLs)) ?? [], [preview, existingEpisodeURLs]);
   const visibleTasks = useMemo(() => taskFilter === "all" ? state.downloads : state.downloads.filter((task) => task.status === taskFilter), [state.downloads, taskFilter]);
+  const selectableVisibleTasks = useMemo(() => visibleTasks.filter((task) => task.status !== "downloading"), [visibleTasks]);
+  const selectedVisibleTasks = useMemo(() => selectableVisibleTasks.filter((task) => selectedTaskIDs.includes(task.id)), [selectableVisibleTasks, selectedTaskIDs]);
   const orderedCategories = useMemo(() => flattenCategories(state.categories), [state.categories]);
   const categoryNames = useMemo(() => new Map(orderedCategories.map((category) => [category.id, category.label])), [orderedCategories]);
   const pageMeta = {
@@ -657,11 +699,11 @@ export default function Home() {
 
         {tab === "downloads" && <section className="page-content">
           <div className={`download-summary ${state.settings.downloadsPaused ? "paused" : ""}`}><div className="summary-orb">{state.settings.downloadsPaused ? <CirclePause size={28} /> : <Gauge size={28} />}</div><div><span>{state.settings.downloadsPaused ? "全局状态" : "当前下载"}</span><strong>{state.settings.downloadsPaused ? state.stats.paused : state.stats.downloading}</strong><small>{state.settings.downloadsPaused ? "任务已安全暂停" : `并发上限 ${state.settings.concurrentDownloads}`}</small></div><div className="summary-divider" /><div><span>排队等待</span><strong>{state.stats.queued}</strong><small>{state.settings.downloadsPaused ? "恢复后自动继续" : "自动按加入顺序处理"}</small></div><div className="summary-divider" /><div><span>累计完成</span><strong>{state.stats.completed}</strong><small>{state.stats.failed ? `${state.stats.failed} 个任务失败` : "任务状态正常"}</small></div></div>
-          <div className="task-toolbar"><div className="filter-tabs">{[["all","全部"],["downloading","下载中"],["queued","等待中"],["paused","已暂停"],["completed","已完成"],["failed","失败"]].map(([key,label]) => <button className={taskFilter === key ? "active" : ""} key={key} onClick={() => setTaskFilter(key)}>{label}</button>)}</div><div className="toolbar-actions"><button className={`bulk-control ${state.settings.downloadsPaused ? "resume" : ""}`} disabled={bulkBusy} onClick={toggleAllDownloads}>{bulkBusy ? <LoaderCircle className="spin" size={15} /> : state.settings.downloadsPaused ? <Play size={15} /> : <Pause size={15} />}{state.settings.downloadsPaused ? "全部恢复" : "全部暂停"}</button><button className="ghost-small" onClick={() => loadState()}><RefreshCw size={15} />刷新</button></div></div>
-          {visibleTasks.length ? <div className="task-list">{visibleTasks.map((task) => <article className="task-row" key={task.id}><div className="task-thumb"><img src={task.poster} alt="" />{task.status === "completed" && <span><Check size={14} /></span>}</div><div className="task-main"><div className="task-heading"><div><h3>{task.title}</h3><p>{task.seriesTitle}</p></div><span className={`task-status ${task.status}`}>{task.status === "downloading" && <LoaderCircle className="spin" size={13} />}{statusText(task.status)}</span></div>
+          <div className="task-toolbar"><div className="filter-tabs">{[["all","全部"],["downloading","下载中"],["queued","等待中"],["paused","已暂停"],["completed","已完成"],["failed","失败"]].map(([key,label]) => <button className={taskFilter === key ? "active" : ""} key={key} onClick={() => { setTaskFilter(key); setSelectedTaskIDs([]); }}>{label}</button>)}</div><div className="toolbar-actions"><button className="ghost-small task-select-all" disabled={!selectableVisibleTasks.length || deletingTaskIDs.length > 0} onClick={() => setSelectedTaskIDs(selectedVisibleTasks.length === selectableVisibleTasks.length ? [] : selectableVisibleTasks.map((task) => task.id))}><Check size={15} />{selectedVisibleTasks.length === selectableVisibleTasks.length && selectableVisibleTasks.length ? "取消全选" : "全选本页"}</button>{selectedVisibleTasks.length > 0 && <button className="task-bulk-delete" disabled={deletingTaskIDs.length > 0} onClick={() => deleteDownloads(selectedVisibleTasks.map((task) => task.id))}>{deletingTaskIDs.length > 0 ? <LoaderCircle className="spin" size={15} /> : <Trash2 size={15} />}删除选中（{selectedVisibleTasks.length}）</button>}<button className={`bulk-control ${state.settings.downloadsPaused ? "resume" : ""}`} disabled={bulkBusy} onClick={toggleAllDownloads}>{bulkBusy ? <LoaderCircle className="spin" size={15} /> : state.settings.downloadsPaused ? <Play size={15} /> : <Pause size={15} />}{state.settings.downloadsPaused ? "全部恢复" : "全部暂停"}</button><button className="ghost-small" onClick={() => loadState()}><RefreshCw size={15} />刷新</button></div></div>
+          {visibleTasks.length ? <div className="task-list">{visibleTasks.map((task) => <article className={`task-row ${selectedTaskIDs.includes(task.id) ? "selected-for-delete" : ""}`} key={task.id}><label className="task-select-box" title={task.status === "downloading" ? "请先取消下载，等待停止后再选择删除" : "选择此任务以批量删除"}><input type="checkbox" aria-label={`选择删除 ${task.title}`} checked={selectedTaskIDs.includes(task.id)} disabled={task.status === "downloading" || deletingTaskIDs.length > 0} onChange={() => toggleTaskSelection(task.id)} /></label><div className="task-thumb"><img src={task.poster} alt="" />{task.status === "completed" && <span><Check size={14} /></span>}</div><div className="task-main"><div className="task-heading"><div><h3>{task.title}</h3><p>{task.seriesTitle}</p></div><span className={`task-status ${task.status}`}>{task.status === "downloading" && <LoaderCircle className="spin" size={13} />}{statusText(task.status)}</span></div>
             {(task.status === "downloading" || task.status === "queued" || task.status === "paused") && <div className="task-progress"><div className="progress-track"><span style={{ width: `${task.progress}%` }} /></div><div><b>{task.status === "queued" ? "等待可用下载槽" : task.status === "paused" ? "已暂停，恢复后重新开始" : `${Math.round(task.progress)}%`}</b><span>{task.speed || (task.status === "queued" || task.status === "paused" ? "" : "正在连接资源…")}</span></div></div>}
             {task.status === "failed" && <div className="task-error">{task.error}</div>}{task.status === "completed" && <div className="task-file"><FolderOpen size={14} /><span title={task.filePath}>{task.filePath}</span>{task.videoQuality && <b title="实际保存的视频画质"> · {task.videoQuality}</b>}</div>}
-          </div><div className="task-actions">{task.status === "completed" && task.filePath && <><button className="retry" title="重新下载并修复之前损坏的视频" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重新下载</button><button className="open-folder" title="在运行程序的电脑上打开保存目录" disabled={openingDirectoryID === task.id} onClick={() => openDownloadDirectory(task)}>{openingDirectoryID === task.id ? <LoaderCircle className="spin" size={15} /> : <FolderOpen size={15} />}打开目录</button><button className="play-video" title="在线播放已下载视频" onClick={() => setPlayingTask(task)}><Play size={15} />播放</button></>}{(task.status === "queued" || task.status === "downloading" || task.status === "paused") && <button title="取消任务" onClick={() => taskAction(task, "cancel")}><X size={17} /></button>}{(task.status === "failed" || task.status === "cancelled") && <button className="retry" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重试</button>}</div></article>)}</div> : <div className="empty-state large"><HardDriveDownload size={32} /><h3>这里暂时没有任务</h3><p>去“选集下载”粘贴链接并勾选集数，或订阅节目自动下载。</p></div>}
+          </div><div className="task-actions">{task.status === "completed" && task.filePath && <><button className="retry" title="重新下载并修复之前损坏的视频" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重新下载</button><button className="open-folder" title="在运行程序的电脑上打开保存目录" disabled={openingDirectoryID === task.id} onClick={() => openDownloadDirectory(task)}>{openingDirectoryID === task.id ? <LoaderCircle className="spin" size={15} /> : <FolderOpen size={15} />}打开目录</button><button className="play-video" title="在线播放已下载视频" onClick={() => setPlayingTask(task)}><Play size={15} />播放</button></>}{(task.status === "queued" || task.status === "downloading" || task.status === "paused") && <button title="取消任务" onClick={() => taskAction(task, "cancel")}><X size={17} /></button>}{(task.status === "failed" || task.status === "cancelled") && <button className="retry" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重试</button>}<button className="task-delete" title={task.status === "downloading" ? "请先取消并停止下载" : "永久删除下载记录及本地视频文件"} disabled={task.status === "downloading" || deletingTaskIDs.length > 0} onClick={() => deleteDownloads([task.id])}>{deletingTaskIDs.includes(task.id) ? <LoaderCircle size={15} className="spin" /> : <Trash2 size={15} />}删除</button></div></article>)}</div> : <div className="empty-state large"><HardDriveDownload size={32} /><h3>这里暂时没有任务</h3><p>去“选集下载”粘贴链接并勾选集数，或订阅节目自动下载。</p></div>}
         </section>}
 
         {tab === "settings" && <section className="page-content settings-grid">

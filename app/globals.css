@@ -285,3 +285,25 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 .episode-empty-state strong { font-size: 13px; color: #43505b; }
 .episode-empty-state p { font-size: 11px; line-height: 1.8; color: #89969c; margin: 8px auto 10px; max-width: 480px; }
 .episode-empty-state a { font-size: 11px; font-weight: 700; color: #e35d41; }
+/* Delete downloads: explicit checkbox selection and permanent-file-delete actions. */
+.task-row.selected-for-delete { border-color: #f0a48e; background: #fff9f6; }
+.task-select-box { flex: 0 0 20px; display: flex; align-items: center; justify-content: center; align-self: stretch; cursor: pointer; }
+.task-select-box input { width: 17px; height: 17px; accent-color: #e85639; cursor: pointer; }
+.task-select-box input:disabled { opacity: .35; cursor: not-allowed; }
+.task-toolbar { flex-wrap: wrap; }
+.toolbar-actions { flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+.task-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.task-actions > button.task-delete, .toolbar-actions > button.task-bulk-delete {
+  border: 1px solid #f0c5ba; color: #c43a28; background: #fff6f3; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; padding: 0 11px; cursor: pointer; font-size: 11px; font-weight: 700;
+}
+.task-actions > button.task-delete:hover:not(:disabled), .toolbar-actions > button.task-bulk-delete:hover:not(:disabled) { background: #ffe9e3; border-color: #e26c50; }
+.task-actions > button.task-delete:disabled, .toolbar-actions > button.task-bulk-delete:disabled { opacity: .45; cursor: not-allowed; }
+.toolbar-actions > button.task-select-all { display: inline-flex; align-items: center; gap: 5px; }
+@media (max-width: 760px) {
+  .task-row { gap: 8px; flex-wrap: wrap; }
+  .task-row .task-main { flex-basis: calc(100% - 120px); }
+  .task-row .task-actions { margin-left: 28px; flex: 1 1 100%; justify-content: flex-end; }
+  .task-toolbar .toolbar-actions { width: 100%; justify-content: flex-start; }
+}
