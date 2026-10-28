@@ -250,29 +250,38 @@ func (m *Manager) QueueEpisodes(ctx context.Context, rawURL string, chosenURLs [
 	if err != nil {
 		return 0, 0, err
 	}
-	allowed := make(map[string]model.Episode, len(series.Episodes))
+	allowed := make(map[string]model.Episode, len(series.Episodes)*2)
 	for _, episode := range series.Episodes {
-		// Only actual CCTV video pages are valid, even when a page embeds
-		// user-controlled or third-party URLs.
+		// Only allow CCTV playback pages or video GUIDs returned from the
+		// freshly resolved official program, never arbitrary client URLs.
 		u, parseErr := url.Parse(episode.PageURL)
-		if parseErr != nil || u.Hostname() != "tv.cctv.com" || (u.Scheme != "https" && u.Scheme != "http") || u.Port() != "" {
-			continue
+		if parseErr == nil && u.Hostname() == "tv.cctv.com" &&
+			(u.Scheme == "https" || u.Scheme == "http") && u.Port() == "" && u.User == nil {
+			allowed[episode.PageURL] = episode
 		}
-		allowed[episode.PageURL] = episode
+		if len(episode.VideoGUID) == 32 {
+			if _, hexErr := hex.DecodeString(episode.VideoGUID); hexErr == nil {
+				allowed[episode.VideoGUID] = episode
+			}
+		}
 	}
 	selection := make([]model.Episode, 0, len(chosenURLs))
 	seen := make(map[string]bool, len(chosenURLs))
 	skipped := 0
-	for _, pageURL := range chosenURLs {
-		episode, ok := allowed[pageURL]
+	for _, chosenID := range chosenURLs {
+		episode, ok := allowed[chosenID]
 		if !ok {
-			return 0, 0, errors.New("所选单集不属于该央视节目，请重新解析链接")
+			return 0, 0, errors.New("所选视频不属于该央视节目，请重新解析链接")
 		}
-		if seen[pageURL] {
+		key := episode.VideoGUID
+		if key == "" {
+			key = episode.PageURL
+		}
+		if seen[key] {
 			skipped++
 			continue
 		}
-		seen[pageURL] = true
+		seen[key] = true
 		selection = append(selection, episode)
 	}
 	added, duplicateCount, err := m.queueAdHocEpisodes(series.Title, series.Poster, selection, storageCategoryID)
@@ -1419,7 +1428,7 @@ func resolveURL(baseURL, ref string) string {
 }
 
 func newTask(sub model.Subscription, episode model.Episode, now string) model.DownloadTask {
-	return model.DownloadTask{ID: newID("task"), SubscriptionID: sub.ID, EpisodeID: episode.ID, Title: episode.Title, SeriesTitle: sub.Title, Poster: episode.Image, PageURL: episode.PageURL, Status: "queued", CreatedAt: now}
+	return model.DownloadTask{ID: newID("task"), SubscriptionID: sub.ID, EpisodeID: episode.ID, Title: episode.Title, SeriesTitle: sub.Title, Poster: episode.Image, PageURL: episode.PageURL, VideoGUID: episode.VideoGUID, Status: "queued", CreatedAt: now}
 }
 
 func recountDownloaded(state *model.State, subID string) {

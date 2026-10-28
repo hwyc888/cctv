@@ -95,7 +95,7 @@ func (c *Client) Search(ctx context.Context, query string) ([]model.SearchResult
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			series, resolveErr := c.ResolveSeries(ctx, results[i].SourceURL)
+			series, resolveErr := c.ResolveLink(ctx, results[i].SourceURL)
 			if resolveErr == nil {
 				results[i] = series.SearchResult
 			}
@@ -149,11 +149,36 @@ func (c *Client) ResolveLink(ctx context.Context, rawURL string) (model.Series, 
 		}, nil
 	}
 	series := parseSeries(string(body), normalized)
+	// CCTV search also returns VIDA...shtml program pages. Unlike a VIDE
+	// playback page, their episode lists are often populated by the official
+	// album API and aren't present in the static HTML.
+	if len(series.Episodes) == 0 {
+		if u, parseErr := url.Parse(normalized); parseErr == nil {
+			fileName := u.Path[strings.LastIndex(u.Path, "/")+1:]
+			if strings.HasPrefix(fileName, "VIDA") && strings.HasSuffix(fileName, ".shtml") {
+				albumID := strings.TrimSuffix(fileName, ".shtml")
+				if libraryIDRE.MatchString(albumID) {
+					for page := 1; page <= 2; page++ {
+						list, listErr := c.BrowseLibraryEpisodes(ctx, "special", albumID, page)
+						if listErr != nil {
+							return model.Series{}, fmt.Errorf("读取央视专题节目选集失败: %w", listErr)
+						}
+						series.Episodes = append(series.Episodes, list.Episodes...)
+						if !list.HasMore {
+							break
+						}
+					}
+					series.EpisodeCount = len(series.Episodes)
+					series.IsSingle = len(series.Episodes) == 1
+				}
+			}
+		}
+	}
 	if series.Title == "" {
 		return model.Series{}, errors.New("这个页面不是可识别的 CCTV 节目页面")
 	}
 	if len(series.Episodes) == 0 {
-		return model.Series{}, errors.New("页面中没有找到可下载的选集列表；可以粘贴具体单集播放页")
+		return model.Series{}, errors.New("央视没有返回这个节目的可下载视频，可能尚未发布或已下架")
 	}
 	return series, nil
 }

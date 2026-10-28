@@ -461,3 +461,7 @@ go build -tags standalone -o cctv-sub ./cmd/cctv-sub
 - `POST /api/library/downloads`：提交 `kind`、`id`、`page`、`programTitle`、`videoGuids`、`storageCategoryId`
 
 后端通过央视提供的 GUID 解析视频，不依赖电视剧网页中一定包含 JSON 选集列表。加入队列时会重新验证 GUID 是否确实属于所选栏目和页码，避免下载错误的视频。节目是否可用仍取决于央视的在线接口与播放资源；此功能是**央视点播节目库**，不是直播录制。
+
+### CCTV 专题赛事及单期节目链接
+
+央视搜索中以 `VIDA...shtml` 结尾的专题节目页（如 CMG 世界机器人大赛系列赛、智绘光谷机器人技能大赛闭幕式）常由央视专辑接口动态加载视频，不会在 HTML 内直接提供静态剧集列表。新版自动通过 `NewVideo/getVideoListByAlbumIdNew` 的 `mode=1` 获取可选择的视频及 GUID，单期时显示「下载本期」，多期时显示「选集下载」。后台再次核验所选 GUID 属于该节目后，才加入下载队列。
