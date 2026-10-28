@@ -447,3 +447,17 @@ go build -tags standalone -o cctv-sub ./cmd/cctv-sub
 用户选择保存分类后点击「下载选中」，新任务直接进入现有多线程下载队列，**不需要建立订阅**，且会跳过已经在队列或者已完成的单集。任务依然支持失败重试、视频播放和打开目录；原来的「订阅追更」继续用于自动追新。
 
 接口：`GET /api/resolve?url=<央视页面URL>` 返回解析的 `episodes`；`POST /api/downloads` 接受 `{"sourceUrl":"...","episodeUrls":["..."],"storageCategoryId":"..."}` 并返回 `{"added":n,"skipped":m}`。提交前后服务端都会重新从央视页面确认选集；只允许央视域名视频源，避免用户输入的任意地址进入下载队列。
+
+## 内置「央视片库」：无需搜索和复制链接
+
+现在启动程序默认进入「央视片库」，直接通过央视的节目目录接口浏览**动画片、电视剧、纪录片、特别节目、栏目大全**。栏目大全支持按 CCTV-1 到 CCTV-17 和 CCTV-5+ 等频道筛选。可以切换分类、浏览目录页、点节目查看官方视频选集、按页勾选、加入原下载队列。
+
+片库每页展示最多 24 个节目（栏目 20 个）、每次获取最多 100 条视频，支持上一页/下一页。选集按页下载，切换选集页时会清空当前选择，避免跨页误下载。下载任务不需要建立订阅，使用与之前相同的分片并发、720P/H5E 解密、完成检查、播放与打开目录功能。
+
+片库调用的央视端点：
+
+- `GET /api/library/programs?kind=animation|drama|documentary|special|columns&page=1&channel=...`
+- `GET /api/library/episodes?kind=...&id=...&page=1`
+- `POST /api/library/downloads`：提交 `kind`、`id`、`page`、`programTitle`、`videoGuids`、`storageCategoryId`
+
+后端通过央视提供的 GUID 解析视频，不依赖电视剧网页中一定包含 JSON 选集列表。加入队列时会重新验证 GUID 是否确实属于所选栏目和页码，避免下载错误的视频。节目是否可用仍取决于央视的在线接口与播放资源；此功能是**央视点播节目库**，不是直播录制。

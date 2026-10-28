@@ -225,3 +225,59 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   .episode-picker-buttons { width: 100%; }
   .episode-picker-buttons > button:last-child { flex: 1; }
 }
+
+/* CCTV library: browse the upstream catalog without copying URLs. */
+.library-page { max-width: 1390px; }
+.library-intro { display: flex; justify-content: space-between; align-items: end; gap: 20px; padding: 32px 34px; border-radius: 18px; background: #17232e; color: #fff; overflow: hidden; position: relative; }
+.library-intro::after { content: ""; position: absolute; right: -90px; top: -170px; width: 360px; height: 360px; border-radius: 50%; border: 1px solid rgba(255,255,255,.08); box-shadow: 0 0 0 55px rgba(255,255,255,.025), 0 0 0 110px rgba(255,255,255,.012); pointer-events: none; }
+.library-intro > div, .library-link-button { position: relative; z-index: 1; }
+.library-kicker { display: inline-flex; align-items: center; gap: 8px; color: #ff856b; font-size: 11px; font-weight: 750; }
+.library-intro h2 { font-size: clamp(25px, 3vw, 36px); margin: 12px 0 9px; letter-spacing: -.035em; line-height: 1.25; }
+.library-intro h2 em { font-style: normal; color: #ff765b; }
+.library-intro p { max-width: 690px; margin: 0; color: #b8c6ce; font-size: 12px; line-height: 1.8; }
+.library-link-button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 7px; padding: 12px 15px; border: 1px solid #495663; border-radius: 9px; background: rgba(255,255,255,.065); color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
+.library-link-button:hover { background: rgba(255,255,255,.16); }
+.library-category-tabs { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 10px; margin: 22px 0 18px; }
+.library-category-tabs button { border: 1px solid #e5e9e5; border-radius: 11px; padding: 15px 15px; text-align: left; display: grid; gap: 5px; background: white; cursor: pointer; color: #33434e; transition: border-color .15s, background .15s; }
+.library-category-tabs button:hover { border-color: #edaa96; }
+.library-category-tabs button.active { border-color: #e75c3d; box-shadow: 0 0 0 1px #e75c3d inset; background: #fff5f1; }
+.library-category-tabs strong { font-size: 14px; }
+.library-category-tabs small { font-size: 10px; color: #89959c; }
+.library-filter-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0 22px; padding: 13px 15px; border: 1px solid #e5e8e3; border-radius: 10px; background: #fff; }
+.library-filter-bar label { font-size: 12px; font-weight: 700; color: #35444d; }
+.library-filter-bar select { height: 37px; min-width: 195px; padding: 0 11px; border-radius: 8px; border: 1px solid #dce1dd; background: #fff; font-size: 12px; color: #233442; }
+.library-filter-bar span { color: #98a1a5; font-size: 10px; }
+.library-program-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(255px,1fr)); gap: 15px; }
+.library-program-card { min-width: 0; min-height: 184px; border: 1px solid #e5e8e4; border-radius: 13px; overflow: hidden; display: flex; gap: 0; background: white; box-shadow: 0 9px 25px rgba(23,32,42,.035); transition: border-color .15s, box-shadow .15s; }
+.library-program-card:hover { border-color: #eab5a6; box-shadow: 0 14px 30px rgba(29,44,59,.08); }
+.library-program-poster { flex: 0 0 104px; position: relative; min-height: 184px; display: grid; place-items: center; background: #e5ebe8; color: #a7b0af; overflow: hidden; }
+.library-program-poster img { width: 100%; height: 100%; position: absolute; inset: 0; object-fit: cover; }
+.library-program-poster > span { position: absolute; top: 8px; left: 8px; background: rgba(24,34,42,.78); color: #fff; padding: 3px 5px; border-radius: 4px; font-size: 9px; font-weight: 700; }
+.library-program-info { min-width: 0; flex: 1; display: flex; flex-direction: column; padding: 15px 12px 13px; }
+.library-program-info h4 { margin: 0 0 8px; font-size: 13px; line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: #263641; }
+.library-program-info p { margin: 0 0 11px; color: #8a969a; font-size: 10px; line-height: 1.6; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.library-program-info > button { margin-top: auto; display: inline-flex; justify-content: center; align-items: center; gap: 7px; width: 100%; height: 34px; border-radius: 8px; border: none; background: #eb5538; color: #fff; font-weight: 700; font-size: 11px; cursor: pointer; }
+.library-program-info > button:hover { background: #d84429; }
+.library-program-info > button:disabled { opacity: .55; cursor: wait; }
+.library-pagination { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 23px 0 10px; }
+.library-pagination span { color: #6e7b83; font-size: 11px; }
+.library-pagination button { padding: 9px 16px; border: 1px solid #e0e4df; border-radius: 8px; background: white; color: #45515b; font-size: 11px; cursor: pointer; }
+.library-pagination button:disabled { opacity: .4; cursor: not-allowed; }
+.library-loading .library-poster-skeleton { flex: 0 0 104px; background: #e7ebe8; }
+.library-loading .library-card-skeleton { align-self: stretch; flex: 1; margin: 20px 12px; border-radius: 7px; background: linear-gradient(110deg,#f0f2ef 8%,#e7eae6 28%,#f0f2ef 50%); background-size: 200% 100%; animation: skeleton-shimmer 1.8s linear infinite; }
+.episode-page-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 0 24px 12px; }
+.episode-page-controls > span { margin-right: auto; color: #8c969c; font-size: 11px; }
+.episode-page-controls > button { padding: 6px 12px; border-radius: 7px; border: 1px solid #dde1dc; background: #fff; color: #39454e; font-size: 11px; cursor: pointer; }
+.episode-page-controls > button:disabled { opacity: .4; cursor: not-allowed; }
+@media (max-width: 1050px) { .library-category-tabs { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@media (max-width: 650px) {
+  .library-intro { padding: 25px 20px; flex-direction: column; align-items: stretch; }
+  .library-intro h2 { font-size: 25px; }
+  .library-link-button { align-self: flex-start; }
+  .library-category-tabs { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+  .library-category-tabs button { padding: 12px; }
+  .library-program-grid { grid-template-columns: 1fr; gap: 11px; }
+  .library-program-card, .library-program-poster { min-height: 160px; }
+  .library-filter-bar select { min-width: 100%; }
+  .episode-page-controls { padding: 0 13px 12px; }
+}

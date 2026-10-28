@@ -275,10 +275,55 @@ func (m *Manager) QueueEpisodes(ctx context.Context, rawURL string, chosenURLs [
 		seen[pageURL] = true
 		selection = append(selection, episode)
 	}
-	added := 0
+	added, duplicateCount, err := m.queueAdHocEpisodes(series.Title, series.Poster, selection, storageCategoryID)
+	return added, skipped + duplicateCount, err
+}
+
+// QueueLibraryEpisodes validates every selected video GUID against the
+// current official CCTV API page before adding it to the download queue.
+func (m *Manager) QueueLibraryEpisodes(ctx context.Context, kind, id, title string, page int, guids []string, categoryID string) (int, int, error) {
+	if len(guids) == 0 || len(guids) > 100 {
+		return 0, 0, errors.New("请从当前页面选择 1 到 100 个视频")
+	}
+	browse, err := m.cctv.BrowseLibraryEpisodes(ctx, kind, id, page)
+	if err != nil {
+		return 0, 0, err
+	}
+	allowed := make(map[string]model.Episode, len(browse.Episodes))
+	for _, episode := range browse.Episodes {
+		allowed[episode.VideoGUID] = episode
+	}
+	var selected []model.Episode
+	seen := make(map[string]bool, len(guids))
+	skipped := 0
+	for _, guid := range guids {
+		episode, ok := allowed[guid]
+		if !ok {
+			return 0, 0, errors.New("所选视频不属于当前央视栏目，请重新加载列表")
+		}
+		if seen[guid] {
+			skipped++
+			continue
+		}
+		seen[guid] = true
+		selected = append(selected, episode)
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "央视节目"
+	}
+	if len([]rune(title)) > 100 {
+		return 0, 0, errors.New("节目名称过长")
+	}
+	added, duplicates, err := m.queueAdHocEpisodes(title, "", selected, categoryID)
+	return added, skipped + duplicates, err
+}
+
+func (m *Manager) queueAdHocEpisodes(seriesTitle, fallbackPoster string, selection []model.Episode, categoryID string) (int, int, error) {
+	added, skipped := 0, 0
 	now := time.Now().Format(time.RFC3339)
-	err = m.store.Update(func(state *model.State) error {
-		if !categoryExists(state.Categories, storageCategoryID) {
+	err := m.store.Update(func(state *model.State) error {
+		if !categoryExists(state.Categories, categoryID) {
 			return errors.New("所选保存分类已不存在")
 		}
 		episodeURLs := make(map[string]string, len(state.Episodes))
@@ -286,6 +331,7 @@ func (m *Manager) QueueEpisodes(ctx context.Context, rawURL string, chosenURLs [
 			episodeURLs[episode.ID] = episode.PageURL
 		}
 		existingURLs := make(map[string]bool)
+		existingGUIDs := make(map[string]bool)
 		for _, task := range state.Downloads {
 			if task.Status == "failed" || task.Status == "cancelled" {
 				continue
@@ -297,22 +343,30 @@ func (m *Manager) QueueEpisodes(ctx context.Context, rawURL string, chosenURLs [
 			if pageURL != "" {
 				existingURLs[pageURL] = true
 			}
+			if task.VideoGUID != "" {
+				existingGUIDs[task.VideoGUID] = true
+			}
 		}
 		tasks := make([]model.DownloadTask, 0, len(selection))
 		for _, episode := range selection {
-			if existingURLs[episode.PageURL] {
+			if episode.PageURL != "" && existingURLs[episode.PageURL] || episode.VideoGUID != "" && existingGUIDs[episode.VideoGUID] {
 				skipped++
 				continue
 			}
-			existingURLs[episode.PageURL] = true
+			if episode.PageURL != "" {
+				existingURLs[episode.PageURL] = true
+			}
+			if episode.VideoGUID != "" {
+				existingGUIDs[episode.VideoGUID] = true
+			}
 			poster := episode.Image
 			if poster == "" {
-				poster = series.Poster
+				poster = fallbackPoster
 			}
 			task := model.DownloadTask{
-				ID: newID("task"), Title: episode.Title, SeriesTitle: series.Title,
-				Poster: poster, PageURL: episode.PageURL,
-				StorageCategoryID: storageCategoryID, Status: "queued", CreatedAt: now,
+				ID: newID("task"), Title: episode.Title, SeriesTitle: seriesTitle,
+				Poster: poster, PageURL: episode.PageURL, VideoGUID: episode.VideoGUID,
+				StorageCategoryID: categoryID, Status: "queued", CreatedAt: now,
 			}
 			if state.Settings.DownloadsPaused {
 				task.Status = "paused"
@@ -323,13 +377,10 @@ func (m *Manager) QueueEpisodes(ctx context.Context, rawURL string, chosenURLs [
 		state.Downloads = append(tasks, state.Downloads...)
 		return nil
 	})
-	if err != nil {
-		return 0, 0, err
-	}
-	if added > 0 {
+	if err == nil && added > 0 {
 		m.Notify()
 	}
-	return added, skipped, nil
+	return added, skipped, err
 }
 
 func (m *Manager) CheckSubscription(ctx context.Context, id string) error {
@@ -687,8 +738,8 @@ func (m *Manager) runTask(ctx context.Context, id string) {
 			break
 		}
 	}
-	if task.SubscriptionID == "" && task.PageURL != "" {
-		episode = model.Episode{PageURL: task.PageURL, Title: task.Title, Image: task.Poster}
+	if task.SubscriptionID == "" && (task.PageURL != "" || task.VideoGUID != "") {
+		episode = model.Episode{PageURL: task.PageURL, VideoGUID: task.VideoGUID, Title: task.Title, Image: task.Poster}
 		sub = model.Subscription{Title: task.SeriesTitle, StorageCategoryID: task.StorageCategoryID}
 	}
 	for _, item := range snapshot.Categories {
@@ -697,7 +748,7 @@ func (m *Manager) runTask(ctx context.Context, id string) {
 			break
 		}
 	}
-	if episode.PageURL == "" || sub.Title == "" {
+	if episode.PageURL == "" && episode.VideoGUID == "" || sub.Title == "" {
 		m.failTask(id, errors.New("下载任务关联的视频数据不存在"))
 		return
 	}
@@ -705,7 +756,13 @@ func (m *Manager) runTask(ctx context.Context, id string) {
 		m.failTask(id, errors.New("订阅关联的保存分类不存在或未设置路径"))
 		return
 	}
-	video, err := m.cctv.ResolveVideo(ctx, episode.PageURL)
+	var video cctv.VideoInfo
+	var err error
+	if episode.VideoGUID != "" {
+		video, err = m.cctv.ResolveVideoByGUID(ctx, episode.VideoGUID)
+	} else {
+		video, err = m.cctv.ResolveVideo(ctx, episode.PageURL)
+	}
 	if err != nil {
 		m.finishFromError(id, err)
 		return

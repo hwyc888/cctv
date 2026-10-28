@@ -47,6 +47,7 @@ type Episode struct {
 	Number         int    `json:"number"`
 	Title          string `json:"title"`
 	PageURL        string `json:"pageUrl"`
+	VideoGUID      string `json:"videoGuid,omitempty"`
 	Image          string `json:"image"`
 	Description    string `json:"description"`
 	PublishedAt    string `json:"publishedAt,omitempty"`
@@ -65,6 +66,7 @@ type DownloadTask struct {
 	FilePath       string  `json:"filePath,omitempty"`
 	VideoQuality   string  `json:"videoQuality,omitempty"`
 	PageURL           string  `json:"pageUrl,omitempty"`
+	VideoGUID         string  `json:"videoGuid,omitempty"`
 	StorageCategoryID string  `json:"storageCategoryId,omitempty"`
 	Error          string  `json:"error,omitempty"`
 	CreatedAt      string  `json:"createdAt"`

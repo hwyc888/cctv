@@ -178,7 +178,16 @@ func (c *Client) ResolveVideo(ctx context.Context, pageURL string) (VideoInfo, e
 	if len(match) != 2 {
 		return VideoInfo{}, errors.New("单集页面中没有找到视频标识")
 	}
-	infoURL := "https://vdn.apps.cntv.cn/api/getHttpVideoInfo.do?pid=" + string(match[1])
+	return c.ResolveVideoByGUID(ctx, string(match[1]))
+}
+
+// ResolveVideoByGUID uses CCTV's playback API for video entries returned
+// directly by the official library API, without fetching a playback page.
+func (c *Client) ResolveVideoByGUID(ctx context.Context, guid string) (VideoInfo, error) {
+	if !libraryGUIDRE.MatchString(guid) {
+		return VideoInfo{}, errors.New("视频 GUID 格式不正确")
+	}
+	infoURL := "https://vdn.apps.cntv.cn/api/getHttpVideoInfo.do?pid=" + guid
 	data, err := c.fetch(ctx, infoURL)
 	if err != nil {
 		return VideoInfo{}, fmt.Errorf("读取播放信息: %w", err)

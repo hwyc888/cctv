@@ -1,0 +1,27 @@
+name: Verify live CCTV library API
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - internal/cctv/library.go
+      - internal/cctv/library_test.go
+      - .github/workflows/verify-library.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Verify CCTV program and episode browsing against real APIs
+        env:
+          CCTV_LIBRARY_INTEGRATION: "1"
+        run: go test ./internal/cctv -run '^TestLiveCCTVLibraryIntegration$' -count=1 -v -timeout 3m
