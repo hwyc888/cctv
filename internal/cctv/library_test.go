@@ -235,5 +235,13 @@ func TestLiveAnimationCatalogEpisodes(t *testing.T) {
 		if !libraryGUIDRE.MatchString(episodes.Episodes[0].VideoGUID) {
 			t.Fatalf("missing playable GUID in %s", program.Title)
 		}
+		if strings.Contains(program.Title, "丛林救援队") {
+			next, err := client.BrowseLibraryEpisodes(ctx, "animation", program.ID, 2)
+			if err != nil || len(next.Episodes) == 0 || next.Total <= 100 ||
+				next.Page != 2 || next.Episodes[0].Number != 101 {
+				t.Fatalf("video episodes beyond first 100 were lost: %#v %v", next, err)
+			}
+			t.Logf("real second page: %s, page=%d episodes=%d total=%d", program.Title, next.Page, len(next.Episodes), next.Total)
+		}
 	}
 }
