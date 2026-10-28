@@ -1,0 +1,55 @@
+name: Research native CCTV H5E 720p compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/research-h5e-720p.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch previously captured public CCTV test segments
+        uses: actions/download-artifact@v4
+        with:
+          name: cctv-video-diagnostics
+          run-id: 40541181032
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: samples
+
+      - name: Fetch upstream GPLv3 C++ research implementation (not incorporated into this repo)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upstream
+          REV=1362fdbdbc9f2a5d523381606fcb31fc4183d0e4
+          BASE="https://raw.githubusercontent.com/letr007/CCTVVideoDownloader/${REV}/src/core/src/crypto"
+          curl --retry 3 --fail --silent --show-error --location "${BASE}/cctv_h5e_decrypt.hpp" -o upstream/cctv_h5e_decrypt.hpp
+          curl --retry 3 --fail --silent --show-error --location "${BASE}/cctv_h5e_decrypt.cpp" -o upstream/cctv_h5e_decrypt.cpp
+          g++ -std=c++17 -O2 -DCCTV_H5E_CLI -o upstream/h5e-decrypt upstream/cctv_h5e_decrypt.cpp
+          test -x upstream/h5e-decrypt
+      - name: Decrypt three original 720p TS samples for external frame validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p decrypted
+          for i in 0 1 2; do
+            upstream/h5e-decrypt "samples/candidate-${i}.ts" "decrypted/candidate-${i}-native.ts"
+            test -s "decrypted/candidate-${i}-native.ts"
+            sha256sum "samples/candidate-${i}.ts" "decrypted/candidate-${i}-native.ts"
+          done
+          cp samples/candidate-3.ts decrypted/candidate-3-clear-reference.ts
+      - name: Upload decrypted sample for real FFmpeg decode in local test environment
+        uses: actions/upload-artifact@v4
+        with:
+          name: cctv-720p-native-research
+          path: decrypted/*.ts
+          retention-days: 2
+          if-no-files-found: error
