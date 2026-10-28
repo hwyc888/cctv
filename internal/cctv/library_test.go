@@ -66,7 +66,7 @@ func TestLibraryEpisodesUseOfficialGUIDAndPagination(t *testing.T) {
 				t.Errorf("incorrect column episodes request: %s", req.URL)
 			}
 		case "/NewVideo/getVideoListByAlbumIdNew":
-			if req.URL.Query().Get("id") != "VIDA123456789abc" || req.URL.Query().Get("sort") != "asc" {
+			if req.URL.Query().Get("id") != "VIDA123456789abc" || req.URL.Query().Get("sort") != "asc" || req.URL.Query().Get("mode") != "1" {
 				t.Errorf("incorrect album episodes request: %s", req.URL)
 			}
 		default:
@@ -157,22 +157,6 @@ func TestLiveCCTVLibraryIntegration(t *testing.T) {
 				continue
 			}
 			t.Logf("program=%s episode-count=%d", program.Title, len(episodes.Episodes))
-			if kind == "animation" && len(episodes.Episodes) == 0 && i == 0 {
-				for _, mode := range []string{"0", "1", "2"} {
-					query := "https://api.cntv.cn/NewVideo/getVideoListByAlbumIdNew?id=" + program.ID +
-						"&serviceId=tvcctv&p=1&n=5&sort=asc&pub=1&mode=" + mode
-					raw, probeErr := client.fetch(ctx, query)
-					if len(raw) > 700 {
-						raw = raw[:700]
-					}
-					t.Logf("live album mode=%s response=%q error=%v", mode, string(raw), probeErr)
-				}
-				raw, probeErr := client.fetch(ctx, "https://api.cntv.cn/NewVideoset/getVideoAlbumInfoByVideoId?id="+program.ID+"&serviceId=tvcctv")
-				if len(raw) > 700 {
-					raw = raw[:700]
-				}
-				t.Logf("live album lookup response=%q error=%v", string(raw), probeErr)
-			}
 			if len(episodes.Episodes) != 0 {
 				loaded = true
 				break

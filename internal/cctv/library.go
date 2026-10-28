@@ -254,6 +254,9 @@ func (c *Client) BrowseLibraryEpisodes(ctx context.Context, kind, id string, pag
 		query.Set("d", "")
 		endpoint = "https://api.cntv.cn/NewVideo/getVideoListByColumn"
 	} else {
+		// The current CCTV catalog returns complete episodes for mode=1;
+		// mode=0 can return an empty list for otherwise valid albums.
+		query.Set("mode", "1")
 		query.Set("sort", "asc")
 		query.Set("pub", "1")
 	}
