@@ -57,14 +57,15 @@ func TestDeleteDownloadsHTTPRemovesRealFilesSingleAndBatch(t *testing.T) {
 	batch:=httptest.NewRecorder()
 	server.ServeHTTP(batch,httptest.NewRequest(http.MethodPost,"/api/downloads/delete-batch",bytes.NewReader(body)))
 	if batch.Code!=http.StatusOK {t.Fatalf("batch delete failed: %d %s",batch.Code,batch.Body.String())}
-	if err:=json.Unmarshal(batch.Body.Bytes(),&count);err!=nil || count.Deleted!=2 || count.FilesDeleted!=2 {
+	if err:=json.Unmarshal(batch.Body.Bytes(),&count);err!=nil || count.Deleted!=2 || count.FilesDeleted!=2 || count.DirectoriesDeleted!=1 {
 		t.Fatalf("batch delete response: %#v %v",count,err)
 	}
 	for _,filename:=range paths {
 		if _,err:=os.Stat(filename);!os.IsNotExist(err) {t.Fatalf("file still present after API delete: %s %v",filename,err)}
 	}
 	if len(st.Snapshot().Downloads)!=0 {t.Fatal("download task metadata was not removed")}
-	if _,err:=os.Stat(seriesDir);err!=nil {t.Fatal("folder must not be removed",err)}
+	if _,err:=os.Stat(seriesDir);!os.IsNotExist(err) {t.Fatalf("empty series directory must be removed: %v",err)}
+	if _,err:=os.Stat(root);err!=nil {t.Fatalf("configured download category root must stay: %v",err)}
 }
 
 func TestDeleteDownloadsHTTPRejectsBadIDsAndCrossSiteOrigin(t *testing.T) {
