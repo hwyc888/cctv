@@ -243,6 +243,8 @@ export default function Home() {
   const [playingTask, setPlayingTask] = useState<DownloadTask | null>(null);
   const [openingDirectoryID, setOpeningDirectoryID] = useState<string | null>(null);
   const settingsInitialized = useRef(false);
+  const managedEpisodePollBusy = useRef(false);
+  const managedSubscriptionID = managedSubscription?.id;
 
   const notify = useCallback((text: string, type: "ok" | "error" = "ok") => {
     setToast({ text, type });
@@ -296,6 +298,28 @@ export default function Home() {
     }).finally(() => { if (active) setLibraryLoading(false); });
     return () => { active = false; };
   }, [tab, libraryKind, libraryChannel, libraryPage, libraryReload]);
+
+  useEffect(() => {
+    if (!managedSubscriptionID) return;
+    let active = true;
+    const refresh = async () => {
+      if (managedEpisodePollBusy.current || managedEpisodesBusy || managedEpisodesLoading) return;
+      managedEpisodePollBusy.current = true;
+      try {
+        const result = await api<SubscriptionEpisodeResult>(`/api/subscriptions/${encodeURIComponent(managedSubscriptionID)}/episodes`);
+        if (active) setManagedEpisodes(result.episodes);
+      } catch {
+        // A temporary polling error should not interrupt the management dialog.
+      } finally {
+        managedEpisodePollBusy.current = false;
+      }
+    };
+    const timer = window.setInterval(() => { void refresh(); }, 2500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [managedSubscriptionID, managedEpisodesBusy, managedEpisodesLoading]);
 
   function showEpisodePicker(series: SeriesPreview) {
     setPreview(series);
@@ -434,11 +458,25 @@ export default function Home() {
   }
 
   async function openSubscriptionManager(sub: Subscription) {
-    setManagedSubscription(sub); setManagedEpisodes([]); setSelectedManagedEpisodeIDs([]); setManagedEpisodeFilter("all");
+    setManagedSubscription(sub);
+    setManagedEpisodes([]);
+    setSelectedManagedEpisodeIDs([]);
+    setManagedEpisodeFilter("all");
     setManagedEpisodesLoading(true);
     try {
       const result = await api<SubscriptionEpisodeResult>(`/api/subscriptions/${encodeURIComponent(sub.id)}/episodes`);
       setManagedEpisodes(result.episodes);
+      if (result.episodes.length === 0) {
+        // Older subscriptions may not have a persisted episode catalog yet. Start a
+        // fresh CCTV check so the table can populate itself while the dialog is open.
+        try {
+          await api(`/api/subscriptions/${encodeURIComponent(sub.id)}/check`, { method: "POST" });
+          notify("尚未读取到集数，已自动检查央视目录；列表会自动刷新");
+        } catch {
+          notify("暂时没有集数记录，请点击“检查新集”重试", "error");
+        }
+      }
+      await loadState(true);
     } catch (error) { notify(error instanceof Error ? error.message : "读取订阅集数失败", "error"); }
     finally { setManagedEpisodesLoading(false); }
   }
@@ -460,6 +498,9 @@ export default function Home() {
 
   async function queueManagedEpisodes(ids: string[]) {
     if (!managedSubscription || !ids.length || managedEpisodesBusy) return;
+    const selected = managedEpisodes.filter((episode) => ids.includes(episode.id));
+    const completedCount = selected.filter((episode) => episode.status === "completed").length;
+    if (completedCount && !window.confirm(`选中的集数中有 ${completedCount} 集已经下载完成。重新下载后，原视频会在新文件验证成功后才替换。确定继续吗？`)) return;
     setManagedEpisodesBusy(true);
     try {
       const result = await api<{ added: number; skipped: number }>(`/api/subscriptions/${encodeURIComponent(managedSubscription.id)}/episodes/queue`, {
@@ -501,6 +542,36 @@ export default function Home() {
     }
   }
 
+  async function cancelManagedEpisodes(episodeIDs: string[]) {
+    if (!managedSubscription || managedEpisodesBusy || !episodeIDs.length) return;
+    const eligible = managedEpisodes.filter((episode) =>
+      episodeIDs.includes(episode.id) && !!episode.taskId && ["queued", "downloading", "paused"].includes(episode.status)
+    );
+    if (!eligible.length) {
+      notify("所选集数中没有可以取消的下载任务", "error");
+      return;
+    }
+    if (!window.confirm(`确定取消选中的 ${eligible.length} 个下载任务吗？`)) return;
+    setManagedEpisodesBusy(true);
+    let cancelled = 0;
+    let failed = 0;
+    try {
+      for (const episode of eligible) {
+        try {
+          await api(`/api/downloads/${encodeURIComponent(episode.taskId as string)}/cancel`, { method: "POST" });
+          cancelled++;
+        } catch {
+          failed++;
+        }
+      }
+      notify(failed ? `已请求取消 ${cancelled} 集，另有 ${failed} 集操作失败` : `已请求取消 ${cancelled} 集`, failed ? "error" : "ok");
+      setSelectedManagedEpisodeIDs([]);
+      await refreshManagedEpisodes();
+    } finally {
+      setManagedEpisodesBusy(false);
+    }
+  }
+
   async function manageEpisodeAction(episode: SubscriptionEpisodeRow, action: "retry" | "cancel" | "open" | "play") {
     if (!episode.taskId) return;
     const task = state.downloads.find((item) => item.id === episode.taskId);
@@ -514,6 +585,19 @@ export default function Home() {
       await refreshManagedEpisodes();
     } catch (error) { notify(error instanceof Error ? error.message : "操作失败", "error"); }
     finally { setManagedEpisodesBusy(false); }
+  }
+
+  async function checkManagedSubscription() {
+    if (!managedSubscription || managedEpisodesBusy) return;
+    setManagedEpisodesBusy(true);
+    try {
+      await api(`/api/subscriptions/${encodeURIComponent(managedSubscription.id)}/check`, { method: "POST" });
+      notify(`正在检查《${managedSubscription.title.replace(/[《》]/g, "")}》；集数列表会自动刷新`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "检查订阅失败", "error");
+    } finally {
+      setManagedEpisodesBusy(false);
+    }
   }
 
   async function checkSubscription(sub: Subscription) {
@@ -827,21 +911,21 @@ export default function Home() {
 
       {managedSubscription && <div className="modal-backdrop subscription-episodes-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !managedEpisodesBusy) setManagedSubscription(null); }}>
         <section className="subscription-episodes-modal" role="dialog" aria-modal="true" aria-labelledby="subscription-episodes-title">
-          <header className="subscription-episodes-header"><img src={managedSubscription.poster} alt="" /><div><span className="library-kicker"><ListChecks size={15} />订阅集数管理</span><h2 id="subscription-episodes-title">{managedSubscription.title}</h2><p>{managedEpisodes.length} 集已发现 · 待下载 {managedEpisodes.filter((e) => e.status === "not_downloaded").length} · 下载中 {managedEpisodes.filter((e) => e.status === "downloading" || e.status === "queued" || e.status === "paused").length} · 已完成 {managedEpisodes.filter((e) => e.status === "completed").length} · 失败 {managedEpisodes.filter((e) => e.status === "failed").length}</p></div><button className="episode-modal-close" title="关闭" onClick={() => setManagedSubscription(null)} disabled={managedEpisodesBusy}><X size={19} /></button></header>
+          <header className="subscription-episodes-header"><img src={managedSubscription.poster} alt="" /><div><span className="library-kicker"><ListChecks size={15} />订阅集数管理</span><h2 id="subscription-episodes-title">{managedSubscription.title}</h2><div className="subscription-episodes-summary"><span><b>{managedEpisodes.length}</b> 已发现</span><span className="pending"><b>{managedEpisodes.filter((e) => e.status === "not_downloaded").length}</b> 待下载</span><span className="active"><b>{managedEpisodes.filter((e) => ["queued", "downloading", "paused"].includes(e.status)).length}</b> 处理中</span><span className="done"><b>{managedEpisodes.filter((e) => e.status === "completed").length}</b> 已完成</span><span className="failed"><b>{managedEpisodes.filter((e) => e.status === "failed").length}</b> 失败</span></div></div><button className="episode-modal-close" title="关闭" onClick={() => setManagedSubscription(null)} disabled={managedEpisodesBusy}><X size={19} /></button></header>
           <div className="subscription-episodes-toolbar"><div className="filter-tabs">{[["all","全部"],["not_downloaded","待下载"],["queued","等待中"],["downloading","下载中"],["paused","已暂停"],["completed","已完成"],["failed","失败"],["cancelled","已取消"]].map(([key,label]) => <button key={key} className={managedEpisodeFilter === key ? "active" : ""} onClick={() => { setManagedEpisodeFilter(key); setSelectedManagedEpisodeIDs([]); }}>{label}</button>)}</div>
-            <div className="subscription-episodes-bulk"><span className="managed-selection-count">已选 {selectedManagedEpisodeIDs.length} 集</span><button className="ghost-small" disabled={managedEpisodesLoading || managedEpisodesBusy} onClick={() => { const rows = managedEpisodes.filter((e) => managedEpisodeFilter === "all" || e.status === managedEpisodeFilter); setSelectedManagedEpisodeIDs(selectedManagedEpisodeIDs.length === rows.length ? [] : rows.map((e) => e.id)); }}><Check size={14} />全选当前筛选</button><button className="ghost-small" disabled={managedEpisodesLoading || managedEpisodesBusy} onClick={refreshManagedEpisodes}><RefreshCw size={14} />刷新状态</button><button className="primary-small" disabled={!selectedManagedEpisodeIDs.length || managedEpisodesBusy} onClick={() => queueManagedEpisodes(selectedManagedEpisodeIDs)}>{managedEpisodesBusy ? <LoaderCircle className="spin" size={14} /> : <Download size={14} />}下载/重试所选</button><button className="managed-delete-selected" disabled={!selectedManagedEpisodeIDs.some((id) => { const e = managedEpisodes.find((row) => row.id === id); return !!e?.taskId && ["completed","failed","cancelled"].includes(e.status); }) || managedEpisodesBusy} onClick={() => deleteManagedEpisodes(selectedManagedEpisodeIDs)}><Trash2 size={14}/>删除所选任务</button></div>
+            <div className="subscription-episodes-bulk"><span className="managed-selection-count">已选 {selectedManagedEpisodeIDs.length} 集</span><button className="ghost-small" disabled={managedEpisodesLoading || managedEpisodesBusy} onClick={() => { const rows = managedEpisodes.filter((e) => managedEpisodeFilter === "all" || e.status === managedEpisodeFilter); setSelectedManagedEpisodeIDs(selectedManagedEpisodeIDs.length === rows.length ? [] : rows.map((e) => e.id)); }}><Check size={14} />全选当前筛选</button><button className="ghost-small" disabled={managedEpisodesLoading || managedEpisodesBusy} onClick={checkManagedSubscription}><RefreshCw size={14} />检查新集</button><button className="ghost-small" disabled={managedEpisodesLoading || managedEpisodesBusy} onClick={refreshManagedEpisodes}><RefreshCw size={14} />刷新状态</button><button className="primary-small" disabled={!selectedManagedEpisodeIDs.length || managedEpisodesBusy} onClick={() => queueManagedEpisodes(selectedManagedEpisodeIDs)}>{managedEpisodesBusy ? <LoaderCircle className="spin" size={14} /> : <Download size={14} />}下载/重试所选</button><button className="managed-cancel-selected" disabled={!selectedManagedEpisodeIDs.some((id) => { const e = managedEpisodes.find((row) => row.id === id); return !!e?.taskId && ["queued","downloading","paused"].includes(e.status); }) || managedEpisodesBusy} onClick={() => cancelManagedEpisodes(selectedManagedEpisodeIDs)}><X size={14}/>取消所选</button><button className="managed-delete-selected" disabled={!selectedManagedEpisodeIDs.some((id) => { const e = managedEpisodes.find((row) => row.id === id); return !!e?.taskId && ["completed","failed","cancelled"].includes(e.status); }) || managedEpisodesBusy} onClick={() => deleteManagedEpisodes(selectedManagedEpisodeIDs)}><Trash2 size={14}/>删除所选任务</button></div>
           </div>
           {managedEpisodesLoading ? <div className="subscription-episodes-loading"><LoaderCircle className="spin" size={22} />正在读取每集状态…</div> :
           <div className="subscription-episodes-table-wrap"><table className="subscription-episodes-table"><thead><tr><th>选择</th><th>集数</th><th>视频标题</th><th>状态</th><th>进度 / 结果</th><th>操作</th></tr></thead><tbody>
             {managedEpisodes.filter((e) => managedEpisodeFilter === "all" || e.status === managedEpisodeFilter).map((episode) => <tr key={episode.id}>
-              <td><input type="checkbox" checked={selectedManagedEpisodeIDs.includes(episode.id)} disabled={managedEpisodesBusy || episode.status === "downloading"} onChange={() => toggleManagedEpisode(episode.id)} aria-label={`选择第 ${episode.number} 集`} /></td>
+              <td><input type="checkbox" checked={selectedManagedEpisodeIDs.includes(episode.id)} disabled={managedEpisodesBusy} onChange={() => toggleManagedEpisode(episode.id)} aria-label={`选择第 ${episode.number} 集`} /></td>
               <td>{episode.number || "—"}</td><td><div className="managed-episode-title">{episode.title}</div>{episode.publishedAt && <small>{episode.publishedAt}</small>}</td>
               <td><span className={`managed-episode-status ${episode.status}`}>{episode.status === "not_downloaded" ? "待下载" : statusText(episode.status as DownloadTask["status"])}</span></td>
               <td>{["downloading","queued","paused"].includes(episode.status) ? <><div className="progress-track"><span style={{width:`${episode.progress || 0}%`}} /></div><small>{episode.status === "queued" ? "等待下载槽" : episode.status === "paused" ? "已暂停" : `${Math.round(episode.progress || 0)}% ${episode.speed || ""}`}</small></> : episode.status === "completed" ? <small className="managed-episode-path" title={episode.filePath}>{episode.filePath || "已完成"}</small> : episode.status === "failed" ? <small className="managed-episode-error" title={episode.error}>{episode.error || "下载失败"}</small> : <small>—</small>}</td>
               <td><div className="managed-episode-actions">{episode.status === "not_downloaded" ? <button disabled={managedEpisodesBusy} onClick={() => queueManagedEpisodes([episode.id])}><Download size={14}/>下载</button> : ["completed","failed","cancelled"].includes(episode.status) ? <button disabled={managedEpisodesBusy} onClick={() => episode.taskId ? manageEpisodeAction(episode,"retry") : queueManagedEpisodes([episode.id])}><RotateCcw size={14}/>{episode.status === "completed" ? "重新下载" : "重试"}</button> : episode.taskId ? <button disabled={managedEpisodesBusy} onClick={() => manageEpisodeAction(episode,"cancel")}><X size={14}/>取消</button> : null}
               {episode.status === "completed" && episode.taskId && <><button disabled={managedEpisodesBusy} onClick={() => manageEpisodeAction(episode,"play")}><Play size={14}/>播放</button><button disabled={managedEpisodesBusy} onClick={() => manageEpisodeAction(episode,"open")}><FolderOpen size={14}/>目录</button></>}{episode.taskId && ["completed","failed","cancelled"].includes(episode.status) && <button className="managed-row-delete" disabled={managedEpisodesBusy} onClick={() => deleteManagedEpisodes([episode.id])}><Trash2 size={14}/>删除</button>}</div></td>
             </tr>)}
-            {!managedEpisodes.filter((e) => managedEpisodeFilter === "all" || e.status === managedEpisodeFilter).length && <tr><td colSpan={6} className="managed-episodes-empty">没有符合条件的集数。若央视有更新，请先关闭窗口并点击“立即检查”。</td></tr>}
+            {!managedEpisodes.filter((e) => managedEpisodeFilter === "all" || e.status === managedEpisodeFilter).length && <tr><td colSpan={6} className="managed-episodes-empty">没有符合条件的集数。可以点击上方“检查新集”重新读取央视目录。</td></tr>}
           </tbody></table></div>}
           <footer className="subscription-episodes-footer"><span>已完成集重新下载时，原视频会在新文件验证成功后替换。</span><button className="cancel-button" onClick={() => setManagedSubscription(null)} disabled={managedEpisodesBusy}>关闭</button></footer>
         </section>
