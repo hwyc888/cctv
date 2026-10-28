@@ -281,3 +281,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   .library-filter-bar select { min-width: 100%; }
   .episode-page-controls { padding: 0 13px 12px; }
 }
+.episode-empty-state { padding: 25px 16px; margin: 8px 0; border: 1px dashed #e3e6e2; border-radius: 10px; text-align: center; background: #fafbf9; }
+.episode-empty-state strong { font-size: 13px; color: #43505b; }
+.episode-empty-state p { font-size: 11px; line-height: 1.8; color: #89969c; margin: 8px auto 10px; max-width: 480px; }
+.episode-empty-state a { font-size: 11px; font-weight: 700; color: #e35d41; }
