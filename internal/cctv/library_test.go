@@ -2,6 +2,8 @@ package cctv
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -164,6 +166,46 @@ func TestLiveCCTVLibraryIntegration(t *testing.T) {
 		}
 		if !loaded {
 			t.Fatalf("none of the first five %s programs returned selectable videos", kind)
+		}
+	}
+}
+
+func TestLiveAnimationEpisodeModes(t *testing.T) {
+	if os.Getenv("CCTV_LIBRARY_INTEGRATION") != "1" {
+		t.Skip("real CCTV API diagnostics only")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 160*time.Second)
+	defer cancel()
+	client := New()
+	page, err := client.BrowseLibrary(ctx, "animation", "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, program := range page.Programs {
+		if index >= 9 {
+			break
+		}
+		t.Logf("CARD index=%d id=%s title=%q url=%q", index, program.ID, program.Title, program.SourceURL)
+		for _, mode := range []string{"0", "1", "2"} {
+			rawURL := fmt.Sprintf("https://api.cntv.cn/NewVideo/getVideoListByAlbumIdNew?id=%s&serviceId=tvcctv&p=1&n=100&mode=%s&pub=1&sort=asc", program.ID, mode)
+			body, fetchErr := client.fetch(ctx, rawURL)
+			if fetchErr != nil {
+				t.Logf("EP mode=%s error=%v", mode, fetchErr)
+				continue
+			}
+			var data struct {
+				ErrCode any `json:"errcode"`
+				Msg any `json:"msg"`
+				Data struct {
+					Total any `json:"total"`
+					List []map[string]any `json:"list"`
+				} `json:"data"`
+			}
+			parseErr := json.Unmarshal(body, &data)
+			t.Logf("EP mode=%s items=%d total=%v errcode=%v parseErr=%v rawStart=%q", mode, len(data.Data.List), data.Data.Total, data.ErrCode, parseErr, string(body[:min(len(body),200)]))
+			if len(data.Data.List) > 0 {
+				t.Logf("EP item0=%v", data.Data.List[0])
+			}
 		}
 	}
 }
