@@ -46,6 +46,26 @@ jobs:
             sha256sum "samples/candidate-${i}.ts" "decrypted/candidate-${i}-native.ts"
           done
           cp samples/candidate-3.ts decrypted/candidate-3-clear-reference.ts
+      - name: Verify that decoding each segment separately matches the joined output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          data = Path('samples/candidate-0.ts').read_bytes()
+          sizes = [2649860, 2632752]
+          assert sum(sizes) == len(data) and all(s % 188 == 0 for s in sizes)
+          Path('samples/segment0.ts').write_bytes(data[:sizes[0]])
+          Path('samples/segment1.ts').write_bytes(data[sizes[0]:])
+          PY
+          upstream/h5e-decrypt samples/segment0.ts decrypted/segment0-native.ts
+          upstream/h5e-decrypt samples/segment1.ts decrypted/segment1-native.ts
+          cat decrypted/segment0-native.ts decrypted/segment1-native.ts > decrypted/per-segment-native.ts
+          if cmp -s decrypted/per-segment-native.ts decrypted/candidate-0-native.ts; then
+            echo "The per-segment and combined outputs match exactly."
+          else
+            echo "Per-segment and combined outputs differ; real decoding required."
+          fi
       - name: Upload decrypted sample for real FFmpeg decode in local test environment
         uses: actions/upload-artifact@v4
         with:
