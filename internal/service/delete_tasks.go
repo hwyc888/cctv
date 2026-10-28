@@ -11,8 +11,9 @@ import (
 )
 
 type DeleteTasksResult struct {
-	Deleted      int `json:"deleted"`
-	FilesDeleted int `json:"filesDeleted"`
+	Deleted            int `json:"deleted"`
+	FilesDeleted       int `json:"filesDeleted"`
+	DirectoriesDeleted int `json:"directoriesDeleted"`
 }
 
 type stagedVideo struct {
@@ -39,6 +40,7 @@ func (m *Manager) DeleteTasks(ids []string) (DeleteTasksResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var staged []stagedVideo
+	var categoryRoots []string
 	err := m.store.Update(func(state *model.State) error {
 		tasks := make([]model.DownloadTask, 0, len(ids))
 		for _, task := range state.Downloads {
@@ -97,6 +99,11 @@ func (m *Manager) DeleteTasks(ids []string) (DeleteTasksResult, error) {
 		for subID := range affectedSubscriptions {
 			recountDownloaded(state, subID)
 		}
+		for _, category := range state.Categories {
+			if root, err := filepath.EvalSymlinks(category.DownloadPath); err == nil {
+				categoryRoots = append(categoryRoots, root)
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -114,6 +121,12 @@ func (m *Manager) DeleteTasks(ids []string) (DeleteTasksResult, error) {
 			return result, fmt.Errorf("已删除任务记录，但无法彻底清除文件 %s: %w", video.temporary, err)
 		}
 		result.FilesDeleted++
+	}
+	// Only after the files and database records are gone may an empty series
+	// directory be removed. os.Remove never deletes a non-empty directory:
+	// other episodes, partial downloads and user files are preserved.
+	for _, video := range staged {
+		result.DirectoriesDeleted += removeEmptyDownloadDirs(filepath.Dir(video.original), categoryRoots)
 	}
 	m.Notify()
 	return result, nil
@@ -171,4 +184,39 @@ func safeTaskDeletePath(state *model.State, task model.DownloadTask) (string, bo
 		return "", false, errors.New("视频不能直接位于下载分类根目录")
 	}
 	return filename, true, nil
+}
+
+// removeEmptyDownloadDirs prunes empty episode/series folders, stopping
+// before every configured category root. It never recursively removes content.
+func removeEmptyDownloadDirs(directory string, categoryRoots []string) int {
+	removed := 0
+	for {
+		info, err := os.Lstat(directory)
+		if err != nil || !info.IsDir() {
+			return removed
+		}
+		realDirectory, err := filepath.EvalSymlinks(directory)
+		if err != nil {
+			return removed
+		}
+		insideCategory := false
+		for _, root := range categoryRoots {
+			relative, err := filepath.Rel(root, realDirectory)
+			if err != nil {
+				continue
+			}
+			// The category itself must always remain, even when empty.
+			if relative == "." {
+				return removed
+			}
+			if relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				insideCategory = true
+			}
+		}
+		if !insideCategory || os.Remove(directory) != nil {
+			return removed
+		}
+		removed++
+		directory = filepath.Dir(directory)
+	}
 }
