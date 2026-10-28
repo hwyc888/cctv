@@ -64,8 +64,8 @@ type DownloadTask struct {
 	Speed          string  `json:"speed,omitempty"`
 	FilePath       string  `json:"filePath,omitempty"`
 	VideoQuality   string  `json:"videoQuality,omitempty"`
-	PageURL        string  `json:"pageUrl,omitempty"`
-	StorageCategoryID string `json:"storageCategoryId,omitempty"`
+	PageURL           string  `json:"pageUrl,omitempty"`
+	StorageCategoryID string  `json:"storageCategoryId,omitempty"`
 	Error          string  `json:"error,omitempty"`
 	CreatedAt      string  `json:"createdAt"`
 	StartedAt      string  `json:"startedAt,omitempty"`

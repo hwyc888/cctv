@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/http"	"path/filepath"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -78,7 +79,12 @@ func TestQueueEpisodesOnlySelectedWithoutSubscription(t *testing.T) {
 }
 
 func TestQueueEpisodesRespectsPauseAndExistingSubscriptionTasks(t *testing.T) {
-	manager, stateStore, categoryID := queueManagerForTest(t)
+	manager, stateStore, _ := queueManagerForTest(t)
+	category, err := manager.AddCategory("单次下载", "", filepath.Join(t.TempDir(), "videos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	categoryID := category.ID
 	if err := stateStore.Update(func(state *model.State) error {
 		state.Settings.DownloadsPaused = true
 		state.Episodes = append(state.Episodes, model.Episode{ID: "sub_e1", PageURL: queueFirst, SubscriptionID: "sub"})
