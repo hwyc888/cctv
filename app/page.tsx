@@ -42,7 +42,7 @@ type Tab = "library" | "search" | "subscriptions" | "downloads" | "settings";
 type LibraryKind = "animation" | "drama" | "documentary" | "special" | "columns";
 type LibraryProgram = { id: string; kind: LibraryKind; title: string; poster: string; description: string; sourceUrl?: string };
 type LibraryResult = { programs: LibraryProgram[]; page: number; hasMore: boolean };
-type LibraryEpisodesResult = { episodes: Episode[]; page: number; hasMore: boolean };
+type LibraryEpisodesResult = { episodes: Episode[]; page: number; hasMore: boolean; total?: number };
 const LIBRARY_CATEGORIES: { id: LibraryKind; name: string; description: string }[] = [
   { id: "animation", name: "动画片", description: "少儿与动画" },
   { id: "drama", name: "电视剧", description: "热门电视剧" },
@@ -86,6 +86,7 @@ type SeriesPreview = SearchResult & {
   libraryId?: string;
   libraryPage?: number;
   libraryHasMore?: boolean;
+  libraryTotal?: number;
 };
 type Subscription = SearchResult & {
   id: string;
@@ -298,7 +299,7 @@ export default function Home() {
         title: program.title, sourceUrl: program.sourceUrl || "", poster: program.poster,
         description: program.description, episodeCount: data.episodes.length,
         episodes: data.episodes, libraryKind: program.kind, libraryId: program.id,
-        libraryPage: data.page, libraryHasMore: data.hasMore,
+        libraryPage: data.page, libraryHasMore: data.hasMore, libraryTotal: data.total,
       });
     } catch (error) {
       notify(error instanceof Error ? error.message : "无法加载央视选集", "error");
@@ -313,7 +314,7 @@ export default function Home() {
     try {
       const params = new URLSearchParams({ kind: preview.libraryKind, id: preview.libraryId, page: String(page) });
       const result = await api<LibraryEpisodesResult>(`/api/library/episodes?${params}`);
-      setPreview({ ...preview, episodes: result.episodes, libraryPage: result.page, libraryHasMore: result.hasMore });
+      setPreview({ ...preview, episodes: result.episodes, libraryPage: result.page, libraryHasMore: result.hasMore, libraryTotal: result.total });
       setSelectedEpisodeURLs([]);
     } catch (error) {
       notify(error instanceof Error ? error.message : "加载下一页选集失败", "error");
@@ -693,7 +694,7 @@ export default function Home() {
             <div className="episode-modal-title">
               <span className="modal-kicker"><Download size={14} />{preview.isSingle ? "单集直接下载" : "选择要下载的剧集"}</span>
               <h2 id="episode-picker-title">{preview.title}</h2>
-              <p>{preview.libraryKind ? `当前第 ${preview.libraryPage} 页，${preview.episodes.length} 个视频可选` : `${preview.episodes.length} 集可选`} · 下载后可以直接播放</p>
+              <p>{preview.libraryKind ? `第 ${preview.libraryPage} 页：本页 ${preview.episodes.length} 条${preview.libraryTotal ? `，央视返回共 ${preview.libraryTotal} 条` : ""}` : `${preview.episodes.length} 集可选`} · 下载后可以直接播放</p>
             </div>
             <button className="episode-modal-close" aria-label="关闭选集" title="关闭" onClick={() => setPreview(null)} disabled={queueBusy}><X size={19} /></button>
           </header>
@@ -712,6 +713,11 @@ export default function Home() {
             {episodePageLoading && <LoaderCircle className="spin" size={16} />}
           </div>}
           <div className="episode-picker-list">
+            {preview.episodes.length === 0 && <div className="episode-empty-state">
+              <strong>央视暂时未返回可下载的视频</strong>
+              <p>已尝试不同视频列表模式与后续页码。如果央视网页能播放，请通过“链接与搜索”粘贴该节目链接再试；这不代表视频已经下架。</p>
+              {preview.sourceUrl && <a href={preview.sourceUrl} target="_blank" rel="noreferrer">在央视网页检查节目</a>}
+            </div>}
             {preview.episodes.map((episode) => {
               const exists = isEpisodeQueued(episode, existingEpisodeURLs);
               const selected = selectedEpisodeURLs.includes(episodeKey(episode));
