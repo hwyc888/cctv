@@ -307,3 +307,290 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   .task-row .task-actions { margin-left: 28px; flex: 1 1 100%; justify-content: flex-end; }
   .task-toolbar .toolbar-actions { width: 100%; justify-content: flex-start; }
 }
+
+
+/* Subscription episode management: visible entry point and a real table dialog. */
+.subscription-card {
+  grid-template-columns: 76px minmax(0, 1.55fr) minmax(145px, .65fr) minmax(252px, auto);
+}
+.subscription-info[role="button"] { border-radius: 8px; outline-offset: 4px; }
+.subscription-info[role="button"]:hover .subscription-title h3 { color: var(--accent-dark); }
+.subscription-info[role="button"]:focus-visible { outline: 3px solid rgba(233, 84, 50, .22); }
+.subscription-actions { min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; }
+.subscription-actions > button { flex: 0 0 auto; white-space: nowrap; }
+.subscription-actions > button.manage-episodes-button {
+  min-width: 98px;
+  padding: 0 10px;
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+.subscription-actions > button.manage-episodes-button:hover {
+  color: #fff;
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+.subscription-actions > button:disabled { opacity: .5; cursor: not-allowed; }
+
+.subscription-episodes-backdrop { z-index: 130; padding: 16px; }
+.subscription-episodes-modal {
+  width: min(1220px, calc(100vw - 32px));
+  max-height: min(92vh, 920px);
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.55);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 32px 90px rgba(0,0,0,.32);
+}
+.subscription-episodes-header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid #edf0ec;
+  background: linear-gradient(180deg, #fff 0%, #fbfcfa 100%);
+}
+.subscription-episodes-header > img {
+  width: 54px;
+  height: 70px;
+  flex: 0 0 auto;
+  border-radius: 9px;
+  object-fit: cover;
+  background: #eef1ed;
+}
+.subscription-episodes-header > div { flex: 1; min-width: 0; }
+.subscription-episodes-header h2 {
+  margin: 6px 0 9px;
+  font-size: 19px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.subscription-episodes-summary { display: flex; flex-wrap: wrap; gap: 7px; }
+.subscription-episodes-summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid #e8ebe6;
+  border-radius: 7px;
+  color: #707a80;
+  background: #f7f8f5;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.subscription-episodes-summary b { color: #27343c; font-size: 11px; }
+.subscription-episodes-summary .pending { color: #b94a2d; border-color: #f3d3c9; background: #fff4f0; }
+.subscription-episodes-summary .pending b { color: #b94a2d; }
+.subscription-episodes-summary .active { color: #996a12; border-color: #f0dfb5; background: #fff9e9; }
+.subscription-episodes-summary .active b { color: #996a12; }
+.subscription-episodes-summary .done { color: #187d59; border-color: #cce8dc; background: #eef8f3; }
+.subscription-episodes-summary .done b { color: #187d59; }
+.subscription-episodes-summary .failed { color: #b63c29; border-color: #f1c9c0; background: #fff0ed; }
+.subscription-episodes-summary .failed b { color: #b63c29; }
+.subscription-episodes-toolbar {
+  display: grid;
+  gap: 11px;
+  padding: 13px 18px;
+  border-bottom: 1px solid #edf0ec;
+  background: #fbfcfa;
+}
+.subscription-episodes-toolbar .filter-tabs {
+  width: fit-content;
+  max-width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 9px;
+  background: #eef0ec;
+}
+.subscription-episodes-toolbar .filter-tabs button {
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #68747a;
+  background: transparent;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.subscription-episodes-toolbar .filter-tabs button.active {
+  color: #26343c;
+  border-color: #e4e7e2;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(0,0,0,.05);
+}
+.subscription-episodes-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+.managed-selection-count {
+  margin-right: auto;
+  color: #68747a;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.subscription-episodes-bulk > button {
+  min-height: 34px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #dfe4de;
+  border-radius: 8px;
+  color: #56636a;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.subscription-episodes-bulk > button:hover { border-color: #d4b1a5; color: var(--accent-dark); }
+.subscription-episodes-bulk > button.primary-small {
+  border-color: var(--accent);
+  color: #fff;
+  background: var(--accent);
+}
+.subscription-episodes-bulk > button.primary-small:hover { color: #fff; background: var(--accent-dark); }
+.subscription-episodes-bulk > button.managed-cancel-selected {
+  color: #946b17;
+  border-color: #ecd9a5;
+  background: #fff9e8;
+}
+.subscription-episodes-bulk > button.managed-delete-selected {
+  color: #b83d29;
+  border-color: #f0c7bd;
+  background: #fff2ee;
+}
+.subscription-episodes-bulk > button:disabled { opacity: .45; cursor: not-allowed; }
+.subscription-episodes-table-wrap { flex: 1; min-height: 0; overflow: auto; padding: 0 18px 12px; }
+.subscription-episodes-table { width: 100%; min-width: 900px; border-collapse: separate; border-spacing: 0; color: #354149; font-size: 11px; }
+.subscription-episodes-table thead { position: sticky; top: 0; z-index: 2; }
+.subscription-episodes-table th {
+  height: 40px;
+  padding: 0 10px;
+  border-bottom: 1px solid #e7ebe5;
+  color: #7a858b;
+  background: #fff;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.subscription-episodes-table td { padding: 10px; border-bottom: 1px solid #edf0ec; vertical-align: middle; }
+.subscription-episodes-table tbody tr:hover td { background: #fbfcfa; }
+.subscription-episodes-table tbody tr:last-child td { border-bottom: 0; }
+.subscription-episodes-table th:first-child, .subscription-episodes-table td:first-child { width: 52px; text-align: center; }
+.subscription-episodes-table th:nth-child(2), .subscription-episodes-table td:nth-child(2) { width: 60px; text-align: center; }
+.subscription-episodes-table th:nth-child(4), .subscription-episodes-table td:nth-child(4) { width: 95px; }
+.subscription-episodes-table th:nth-child(5), .subscription-episodes-table td:nth-child(5) { width: 220px; }
+.subscription-episodes-table th:last-child, .subscription-episodes-table td:last-child { width: 270px; }
+.subscription-episodes-table input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.managed-episode-title { max-width: 390px; color: #29363e; font-size: 11px; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+.subscription-episodes-table td small { display: block; margin-top: 4px; color: #8b969b; font-size: 9px; line-height: 1.5; }
+.managed-episode-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 7px;
+  border-radius: 6px;
+  color: #6e787e;
+  background: #f0f2ef;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.managed-episode-status.not_downloaded { color: #b94a2d; background: #fff0e9; }
+.managed-episode-status.queued { color: #916813; background: #fff7e3; }
+.managed-episode-status.downloading { color: #bd4b30; background: #fff0eb; }
+.managed-episode-status.paused { color: #657078; background: #ecefed; }
+.managed-episode-status.completed { color: #187d59; background: #e8f7f0; }
+.managed-episode-status.failed { color: #b63c29; background: #ffebe7; }
+.managed-episode-status.cancelled { color: #7a8287; background: #f0f1ef; }
+.managed-episode-path { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #28765a !important; }
+.managed-episode-error { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b63c29 !important; }
+.managed-episode-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.managed-episode-actions button {
+  min-height: 29px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid #e0e4df;
+  border-radius: 7px;
+  color: #5f6b71;
+  background: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.managed-episode-actions button:hover { color: var(--accent-dark); border-color: #e8b7a9; background: #fff8f5; }
+.managed-episode-actions button.managed-row-delete { color: #b63c29; border-color: #f0c7bd; background: #fff2ee; }
+.managed-episode-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.managed-episodes-empty { height: 120px; color: #8b969b !important; text-align: center; font-size: 11px; }
+.subscription-episodes-loading { flex: 1; min-height: 180px; display: flex; align-items: center; justify-content: center; gap: 10px; color: #7d898f; font-size: 12px; }
+.subscription-episodes-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 18px;
+  border-top: 1px solid #edf0ec;
+  background: #fbfcfa;
+}
+.subscription-episodes-footer > span { color: #818c92; font-size: 10px; line-height: 1.5; }
+.subscription-episodes-footer > button {
+  min-width: 76px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid #dfe4de;
+  border-radius: 8px;
+  color: #5b676e;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.subscription-episodes-footer > button:disabled { opacity: .45; cursor: not-allowed; }
+
+@media (max-width: 1100px) {
+  .subscription-card { grid-template-columns: 70px minmax(0, 1fr); gap: 14px; }
+  .subscription-progress { grid-column: 2; }
+  .subscription-actions { grid-column: 2; justify-content: flex-start; margin-top: 0; }
+}
+@media (max-width: 800px) {
+  .subscription-card { grid-template-columns: 64px minmax(0, 1fr); gap: 12px; }
+  .subscription-card > img { width: 64px; height: 86px; }
+  .subscription-progress, .subscription-actions { grid-column: 2; }
+  .subscription-episodes-modal { width: calc(100vw - 16px); max-height: 94vh; min-height: 300px; }
+  .subscription-episodes-header { gap: 10px; padding: 15px; }
+  .subscription-episodes-header > img { width: 42px; height: 56px; }
+  .subscription-episodes-header h2 { font-size: 16px; }
+  .subscription-episodes-toolbar { padding: 10px; }
+  .subscription-episodes-toolbar .filter-tabs { width: 100%; }
+  .subscription-episodes-toolbar .filter-tabs button { padding: 0 8px; }
+  .subscription-episodes-bulk { gap: 6px; }
+  .managed-selection-count { flex: 1 0 100%; }
+  .subscription-episodes-table-wrap { padding: 0 10px 10px; }
+  .subscription-episodes-footer { align-items: flex-start; padding: 10px; }
+}
+@media (max-width: 560px) {
+  .subscription-actions > button.manage-episodes-button { min-width: 100px; }
+  .subscription-episodes-backdrop { padding: 8px; }
+  .subscription-episodes-modal { width: calc(100vw - 16px); }
+  .subscription-episodes-header { align-items: flex-start; }
+  .subscription-episodes-summary { gap: 5px; }
+  .subscription-episodes-summary > span { padding: 4px 6px; font-size: 9px; }
+  .subscription-episodes-footer { flex-direction: column; }
+  .subscription-episodes-footer > button { align-self: flex-end; }
+}
