@@ -464,4 +464,4 @@ go build -tags standalone -o cctv-sub ./cmd/cctv-sub
 
 ### CCTV 专题赛事及单期节目链接
 
-央视搜索中以 `VIDA...shtml` 结尾的专题节目页（如 CMG 世界机器人大赛系列赛、智绘光谷机器人技能大赛闭幕式）常由央视专辑接口动态加载视频，不会在 HTML 内直接提供静态剧集列表。新版自动通过 `NewVideo/getVideoListByAlbumIdNew` 的 `mode=1` 获取可选择的视频及 GUID，单期时显示「下载本期」，多期时显示「选集下载」。后台再次核验所选 GUID 属于该节目后，才加入下载队列。
+央视搜索中以 `VIDA...shtml` 结尾的专题节目页（如 CMG 世界机器人大赛系列赛、智绘光谷机器人技能大赛闭幕式）常由央视专辑接口动态加载视频，不会在 HTML 内直接提供静态剧集列表。新版自动通过 `NewVideo/getVideoListByAlbumIdNew` 的 `mode=2` 获取可选择的视频及 GUID，单期时显示「下载本期」，多期时显示「选集下载」。后台再次核验所选 GUID 属于该节目后，才加入下载队列。

@@ -254,9 +254,13 @@ func (c *Client) BrowseLibraryEpisodes(ctx context.Context, kind, id string, pag
 		query.Set("d", "")
 		endpoint = "https://api.cntv.cn/NewVideo/getVideoListByColumn"
 	} else {
-		// The current CCTV catalog returns complete episodes for mode=1;
-		// mode=0 can return an empty list for otherwise valid albums.
-		query.Set("mode", "1")
+		// Animation and drama albums commonly use mode=1, but CCTV special
+		// event albums may be entirely mode=0: mode=2 includes both.
+		if kind == "special" {
+			query.Set("mode", "2")
+		} else {
+			query.Set("mode", "1")
+		}
 		query.Set("sort", "asc")
 		query.Set("pub", "1")
 	}

@@ -28,7 +28,7 @@ func specialMockClient(t *testing.T) *Client {
 		default:
 			switch req.URL.Path {
 			case "/NewVideo/getVideoListByAlbumIdNew":
-				if req.URL.Query().Get("mode") != "1" || req.URL.Query().Get("pub") != "1" {
+				if req.URL.Query().Get("mode") != "2" || req.URL.Query().Get("pub") != "1" {
 					t.Errorf("wrong CCTV API mode/pub: %s", req.URL)
 				}
 				switch req.URL.Query().Get("id") {
@@ -87,10 +87,7 @@ func TestLiveSpecialProgramLinks(t *testing.T) {
 	for _, pageURL := range []string{specialSeriesURL, specialClosingURL} {
 		series, err := client.ResolveLink(ctx, pageURL)
 		if err != nil {
-			t.Logf("real CCTV special page %s failed: %v", pageURL, err)
-			diagnoseSpecialPage(t, client, ctx, pageURL)
-			t.Fail()
-			continue
+			t.Fatalf("real CCTV special page %s: %v", pageURL, err)
 		}
 		t.Logf("title=%s episodeCount=%d single=%v", series.Title, len(series.Episodes), series.IsSingle)
 		if len(series.Episodes) == 0 {
@@ -108,40 +105,3 @@ func TestLiveSpecialProgramLinks(t *testing.T) {
 	}
 }
 
-func diagnoseSpecialPage(t *testing.T, client *Client, ctx context.Context, pageURL string) {
-	t.Helper()
-	body, err := client.fetch(ctx, pageURL)
-	if err != nil {
-		t.Logf("fetch page: %v", err)
-		return
-	}
-	raw := string(body)
-	t.Logf("page size %d", len(raw))
-	for _, term := range []string{"albumid", "album_id", "columnid", "itemid1", "TOPC", "getVideoList", "videolist", "jsonData", "ctid", "videoguid", "pid", "guid", "programId", "tvtopic", "api.cntv.cn"} {
-		low := strings.ToLower(raw)
-		offset := 0
-		for n := 0; n < 3; n++ {
-			at := strings.Index(low[offset:], strings.ToLower(term))
-			if at < 0 { break }
-			at += offset
-			start, end := at-110, at+220
-			if start < 0 { start = 0 }
-			if end > len(raw) { end = len(raw) }
-			t.Logf("page term=%s at=%d context=%q", term, at, raw[start:end])
-			offset = at+len(term)
-		}
-	}
-	segment := pageURL[strings.LastIndex(pageURL, "/")+1:]
-	albumID := strings.TrimSuffix(segment, ".shtml")
-	base := "https://api.cntv.cn/"
-	for _, suffix := range []string{
-		"NewVideo/getVideoListByAlbumIdNew?id="+albumID+"&serviceId=tvcctv&p=1&n=4&sort=asc&mode=0&pub=1",
-		"NewVideo/getVideoListByAlbumIdNew?id="+albumID+"&serviceId=tvcctv&p=1&n=4&sort=asc&mode=1&pub=1",
-		"NewVideo/getVideoListByAlbumIdNew?id="+albumID+"&serviceId=tvcctv&p=1&n=4&sort=asc&mode=2&pub=1",
-		"NewVideoset/getVideoAlbumInfoByVideoId?id="+albumID+"&serviceId=tvcctv",
-	} {
-		rawReply, err := client.fetch(ctx, base+suffix)
-		if len(rawReply)>600 { rawReply=rawReply[:600] }
-		t.Logf("probe %s response=%q error=%v", suffix, string(rawReply), err)
-	}
-}
