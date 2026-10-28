@@ -426,3 +426,16 @@ go build -tags standalone -o cctv-sub ./cmd/cctv-sub
 ### 重新下载曾经损坏的视频
 
 已完成的视频同样提供「重新下载」按钮。确认后会重新进入队列，原文件在新下载过程中仍然保留；新 MP4 必须通过画面解码测试后才会替换旧文件。Windows 和 Debian 都支持这种安全替换，避免直接覆盖旧文件导致下载失败时文件丢失。
+
+ 
+## 央视 720P / 原生 H5E 解密组件
+
+对于 H5E 加密的 1280×720 央视节目，发布的 Windows 和 Debian 安装包现在会同时提供独立的 `cctv-h5e-decrypt` 原生解密辅助程序。运行时先尝试原始流；原始流加密时，优先使用经真实画面验证的原生 H5E 解密，之后才尝试旧版 WASM，仍失败才使用低清备用源。处理完成的加密视频会进行完整解码校验，避免早期花屏文件被误标记为“已完成”。
+
+**Windows：** 请同时保留 `cctv-sub.exe`、`cctv-h5e-decrypt.exe` 和 `ffmpeg.exe`，放在同一目录。缺少原生辅助程序时仍会尝试旧方案，但不保证 720P 可用。
+
+**Debian：** `.deb` 自动把原生辅助程序安装至 `/usr/lib/cctv-sub/cctv-h5e-decrypt`；使用 Linux `.tar.gz` 时把 `cctv-h5e-decrypt` 与 `cctv-sub` 放在同一目录即可。如有特殊路径，可通过 `CCTV_H5E_DECRYPT_PATH` 指定完整可执行路径。
+
+该辅助程序是基于 [letr007/CCTVVideoDownloader](https://github.com/letr007/CCTVVideoDownloader) 的独立 GPL-3.0 作品，版本固定为 `1362fdbdbc9f2a5d523381606fcb31fc4183d0e4`。它通过文件输入输出作为**独立进程**运行，没有把 GPL 源码合并到 Go 项目中。发布包附带第三方许可证与用于编译的 C++ 源文件，供审查与修改。使用与分发时应遵守 GPL-3.0 和央视内容版权约束。
+
+仅运行 `go build` 不会自动编译第三方 C++ 辅助程序；请使用 GitHub Actions 提供的已打包版本，或自行单独编译并放置到上述路径。

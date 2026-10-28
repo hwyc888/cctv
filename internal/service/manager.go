@@ -651,7 +651,7 @@ func (m *Manager) downloadHLS(ctx context.Context, taskID string, playlistURLs [
 		task.VideoQuality = selected.quality
 		task.Speed = "已检测可播放的视频源，准备下载 " + selected.quality
 	})
-	if err := m.runHLSMedia(ctx, taskID, selected.playlist.Segments, output, selected.useWASM); err != nil {
+	if err := m.runHLSMedia(ctx, taskID, selected.playlist.Segments, output, selected.useWASM, selected.useNative); err != nil {
 		return err
 	}
 	_ = m.updateTask(taskID, func(task *model.DownloadTask) {
@@ -661,7 +661,7 @@ func (m *Manager) downloadHLS(ctx context.Context, taskID string, playlistURLs [
 	if err := checkVideoFilePlayable(ctx, output); err != nil {
 		return fmt.Errorf("MP4 画面验证失败，文件未标记为完成: %w", err)
 	}
-	if m.store.Snapshot().Settings.VerifyVideoAfterDownload {
+	if selected.useNative || m.store.Snapshot().Settings.VerifyVideoAfterDownload {
 		_ = m.updateTask(taskID, func(task *model.DownloadTask) {
 			task.Progress = 97
 			task.Speed = "正在进行全片完整性校验"
@@ -675,7 +675,15 @@ func (m *Manager) downloadHLS(ctx context.Context, taskID string, playlistURLs [
 	return nil
 }
 
-func (m *Manager) runHLSMedia(ctx context.Context, taskID string, segments []hlsSegment, output string, decryptWithWASM bool) error {
+func (m *Manager) runHLSMedia(ctx context.Context, taskID string, segments []hlsSegment, output string, decryptWithWASM, decryptWithNative bool) error {
+	var nativeTool string
+	if decryptWithNative {
+		var err error
+		nativeTool, err = findNativeH5E()
+		if err != nil {
+			return fmt.Errorf("未找到央视 H5E 原生解密组件: %w", err)
+		}
+	}
 	var engine *cctvwasm.Engine
 	if decryptWithWASM {
 		var err error
@@ -726,7 +734,12 @@ func (m *Manager) runHLSMedia(ctx context.Context, taskID string, segments []hls
 		}
 		clear := data
 		var err error
-		if engine != nil {
+		if decryptWithNative {
+			clear, err = nativeH5EDecryptTS(ctx, nativeTool, data)
+			if err != nil {
+				return fmt.Errorf("原生 H5E 解密分片 %d/%d: %w", index+1, len(segments), err)
+			}
+		} else if engine != nil {
 			mediaTagID := fmt.Sprintf("%d-%d", time.Now().UnixMilli(), index)
 			clear, err = engine.DecryptMPEGTS(ctx, data, mediaTagID, cctvPlayerOrigin)
 			if err != nil {
@@ -747,6 +760,8 @@ func (m *Manager) runHLSMedia(ctx context.Context, taskID string, segments []hls
 			method := "直接下载可播放画质"
 			if decryptWithWASM {
 				method = "纯 Go 解密视频"
+			} else if decryptWithNative {
+				method = "原生 H5E 高清解密"
 			}
 			task.Speed = fmt.Sprintf("%d 路并发 · %s %d/%d · %s", parallelism, method, index+1, len(segments), speed)
 		})

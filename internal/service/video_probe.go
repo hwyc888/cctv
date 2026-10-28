@@ -14,9 +14,10 @@ import (
 )
 
 type playableHLS struct {
-	playlist mediaPlaylist
-	useWASM  bool
-	quality  string
+	playlist  mediaPlaylist
+	useWASM   bool
+	useNative bool
+	quality   string
 }
 
 var videoDimensionRE = regexp.MustCompile(`(?m)^#dimensions 0: ([0-9]+)x([0-9]+)`)
@@ -28,6 +29,7 @@ func (m *Manager) choosePlayableHLS(ctx context.Context, playlistURLs []string) 
 	if err != nil {
 		return playableHLS{}, fmt.Errorf("未找到 FFmpeg，无法检测视频画面: %w", err)
 	}
+	nativeExecutable, nativeErr := findNativeH5E()
 	failures := make([]string, 0, len(playlistURLs))
 	for index, url := range playlistURLs {
 		if err := ctx.Err(); err != nil {
@@ -47,6 +49,27 @@ func (m *Manager) choosePlayableHLS(ctx context.Context, playlistURLs []string) 
 		if err == nil {
 			return playableHLS{playlist: playlist, quality: quality}, nil
 		}
+		// A separate GPL-3.0 licensed native helper can handle modern H5E
+		// NAL type 1/5/25 directly, without emulating CCTV's WASM host.
+		if nativeErr == nil {
+			var nativeSample bytes.Buffer
+			var decodeErr error
+			for _, raw := range rawSegments {
+				var decrypted []byte
+				decrypted, decodeErr = nativeH5EDecryptTS(ctx, nativeExecutable, raw)
+				if decodeErr != nil {
+					break
+				}
+				nativeSample.Write(decrypted)
+			}
+			if decodeErr == nil {
+				quality, decodeErr = probeVideoFrames(ctx, executable, nativeSample.Bytes(), "")
+				if decodeErr == nil {
+					return playableHLS{playlist: playlist, useNative: true, quality: quality}, nil
+				}
+			}
+		}
+
 		engine, initErr := m.cctvDecryptorEngine(ctx)
 		if initErr != nil {
 			failures = append(failures, fmt.Sprintf("源%d: WASM 初始化失败 (%v)", index+1, initErr))

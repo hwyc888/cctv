@@ -10,8 +10,66 @@ permissions:
   actions: write
 
 jobs:
+  native-helper:
+    name: Build independent H5E helper on ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-amd64
+            runner: windows-latest
+          - target: linux-amd64
+            runner: ubuntu-latest
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - name: Fetch pinned GPL-3.0 native decoder source
+        uses: actions/checkout@v4
+        with:
+          repository: letr007/CCTVVideoDownloader
+          ref: 1362fdbdbc9f2a5d523381606fcb31fc4183d0e4
+          persist-credentials: false
+          path: h5e-upstream
+      - name: Build standalone Linux helper with static dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p native-out/source
+          g++ -std=c++17 -O2 -static -DCCTV_H5E_CLI \
+            -o native-out/cctv-h5e-decrypt \
+            h5e-upstream/src/core/src/crypto/cctv_h5e_decrypt.cpp
+          chmod 755 native-out/cctv-h5e-decrypt
+          cp h5e-upstream/src/core/src/crypto/cctv_h5e_decrypt.{hpp,cpp} native-out/source/
+          cp h5e-upstream/LICENSE native-out/GPL-3.0-LICENSE
+          file native-out/cctv-h5e-decrypt
+      - name: Enable MSVC build tools
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Build standalone Windows helper (static runtime)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -Type Directory -Force native-out/source | Out-Null
+          cl.exe /nologo /O2 /MT /EHsc /std:c++17 /DCCTV_H5E_CLI /Fe:native-out/cctv-h5e-decrypt.exe h5e-upstream/src/core/src/crypto/cctv_h5e_decrypt.cpp
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item h5e-upstream/src/core/src/crypto/cctv_h5e_decrypt.hpp native-out/source/
+          Copy-Item h5e-upstream/src/core/src/crypto/cctv_h5e_decrypt.cpp native-out/source/
+          Copy-Item h5e-upstream/LICENSE native-out/GPL-3.0-LICENSE
+          if (-not (Test-Path native-out/cctv-h5e-decrypt.exe)) { exit 1 }
+      - name: Upload GPL helper with complete corresponding source
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: native-out/
+          if-no-files-found: error
+          retention-days: 7
+
   build:
     name: Compile and package standalone binaries
+    needs: native-helper
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -34,6 +92,22 @@ jobs:
       - name: Race-test parallel HLS downloads
         run: go test -race ./internal/service ./internal/store
 
+      - name: Retrieve independently built Windows GPL helper
+        uses: actions/download-artifact@v4
+        with:
+          name: native-windows-amd64
+          path: tmp/windows-amd64
+      - name: Retrieve independently built Linux x64 GPL helper
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-amd64
+          path: tmp/linux-amd64
+      - name: Retrieve independently built Linux ARM64 GPL helper
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-arm64
+          path: tmp/linux-arm64
+
       - name: Cross-compile Windows and Debian
         shell: bash
         run: |
@@ -43,15 +117,20 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags standalone -trimpath -ldflags="-s -w" -o tmp/linux-amd64/cctv-sub ./cmd/cctv-sub
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags standalone -trimpath -ldflags="-s -w" -o tmp/linux-arm64/cctv-sub ./cmd/cctv-sub
           file tmp/windows-amd64/cctv-sub.exe tmp/linux-amd64/cctv-sub tmp/linux-arm64/cctv-sub
-          (cd tmp/windows-amd64 && zip -q ../../release/cctv-sub-windows-amd64.zip cctv-sub.exe)
-          tar -C tmp/linux-amd64 -czf release/cctv-sub-linux-amd64.tar.gz cctv-sub
-          tar -C tmp/linux-arm64 -czf release/cctv-sub-linux-arm64.tar.gz cctv-sub
+          test -s tmp/windows-amd64/cctv-h5e-decrypt.exe
+          chmod 755 tmp/linux-amd64/cctv-h5e-decrypt tmp/linux-arm64/cctv-h5e-decrypt
+          (cd tmp/windows-amd64 && zip -qr ../../release/cctv-sub-windows-amd64.zip cctv-sub.exe cctv-h5e-decrypt.exe GPL-3.0-LICENSE source)
+          tar -C tmp/linux-amd64 -czf release/cctv-sub-linux-amd64.tar.gz cctv-sub cctv-h5e-decrypt GPL-3.0-LICENSE source
+          tar -C tmp/linux-arm64 -czf release/cctv-sub-linux-arm64.tar.gz cctv-sub cctv-h5e-decrypt GPL-3.0-LICENSE source
 
           version="1.0.0+git${GITHUB_SHA:0:7}"
           for arch in amd64 arm64; do
             root="tmp/deb-${arch}"
-            mkdir -p "${root}/DEBIAN" "${root}/usr/bin"
+            mkdir -p "${root}/DEBIAN" "${root}/usr/bin" "${root}/usr/lib/cctv-sub" "${root}/usr/share/doc/cctv-sub/h5e-source"
             install -m 0755 "tmp/linux-${arch}/cctv-sub" "${root}/usr/bin/cctv-sub"
+            install -m 0755 "tmp/linux-${arch}/cctv-h5e-decrypt" "${root}/usr/lib/cctv-sub/cctv-h5e-decrypt"
+            install -m 0644 "tmp/linux-${arch}/GPL-3.0-LICENSE" "${root}/usr/share/doc/cctv-sub/GPL-3.0-LICENSE"
+            install -m 0644 "tmp/linux-${arch}/source/"* "${root}/usr/share/doc/cctv-sub/h5e-source/"
             cat > "${root}/DEBIAN/control" <<EOF
           Package: cctv-sub
           Version: ${version}
@@ -91,6 +170,8 @@ jobs:
           grep -q 'CCTV 自动追剧' "${RUNNER_TEMP}/cctv-smoke/index.html"
           curl --fail --silent http://127.0.0.1:18080/favicon.svg -o "${RUNNER_TEMP}/cctv-smoke/favicon.svg"
           test -s "${RUNNER_TEMP}/cctv-smoke/favicon.svg"
+          test -x ./tmp/linux-amd64/cctv-h5e-decrypt
+          test -s ./tmp/windows-amd64/cctv-h5e-decrypt.exe
 
       - name: Upload Windows and Debian packages
         uses: actions/upload-artifact@v4
