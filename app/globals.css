@@ -594,3 +594,67 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
   .subscription-episodes-footer { flex-direction: column; }
   .subscription-episodes-footer > button { align-self: flex-end; }
 }
+
+
+/* Let each CCTV library card offer both episode browsing and subscription. */
+.library-program-card { min-height: 202px; }
+.library-program-poster { min-height: 202px; }
+.library-program-info { min-width: 0; }
+.library-program-actions {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 7px;
+}
+.library-program-actions > button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.library-program-actions > button.library-browse-button {
+  color: #fff;
+  background: #eb5538;
+  border-color: #eb5538;
+}
+.library-program-actions > button.library-browse-button:hover { background: #d84429; border-color: #d84429; }
+.library-program-actions > button.library-subscribe-button {
+  color: #bf4b30;
+  background: #fff5f1;
+  border-color: #f0c7bb;
+}
+.library-program-actions > button.library-subscribe-button:hover {
+  color: #fff;
+  background: #e95432;
+  border-color: #e95432;
+}
+.library-program-actions > button.library-subscribe-button.subscribed {
+  color: #187d59;
+  background: #eaf7f1;
+  border-color: #c6e7d9;
+}
+.library-program-actions > button.library-subscribe-button.subscribed:hover {
+  color: #fff;
+  background: #19845d;
+  border-color: #19845d;
+}
+.library-program-actions > button:disabled { opacity: .55; cursor: not-allowed; }
+.library-program-actions > button:disabled:hover { color: #8a969a; background: #f0f2ef; border-color: #e1e5df; }
+@media (max-width: 380px) {
+  .library-program-poster { flex-basis: 84px; }
+  .library-program-info { padding-left: 9px; padding-right: 9px; }
+  .library-program-actions { gap: 5px; }
+  .library-program-actions > button { padding: 0 3px; font-size: 9px; }
+  .library-program-actions > button svg { width: 13px; height: 13px; }
+}
