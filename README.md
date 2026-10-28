@@ -472,4 +472,4 @@ go build -tags standalone -o cctv-sub ./cmd/cctv-sub
 
 安全限制：正在下载或后台下载协程仍未退出的任务不能直接删除，必须先取消并等待任务停止；只能删除该任务所属当前下载分类目录下的普通 MP4 文件，禁止符号链接/目录/目录外文件；若视频仍被未选择的任务共同引用，必须一并选择，避免误删其他任务需要的视频。若保存路径已修改导致旧文件不在现有分类目录中，程序会拒绝自动删除并说明原因。不存在的文件可删除历史任务记录。批量删除最多选择 200 个任务。
 
-HTTP API：`DELETE /api/downloads/{id}` 删除单条；`POST /api/downloads/delete-batch` 接受 `{"ids":["task_..."]}`。成功返回 `{"deleted":n,"filesDeleted":n}`，两者分别代表删除的任务数与物理删除的视频文件数。
+HTTP API：`DELETE /api/downloads/{id}` 删除单条；`POST /api/downloads/delete-batch` 接受 `{"ids":["task_..."]}`。成功返回 `{"deleted":n,"filesDeleted":n,"directoriesDeleted":n}`，分别表示删除的任务、实际移除的 MP4 和自动清理的空目录数。删除最后一集时，会继续删除已经变空的节目文件夹和其空的上级子目录；批量删除同样适用。如果目录里还有其他视频或任何其他文件，保留该目录及剩余内容。程序绝不会清理用户设置的下载分类根目录，也不会递归删除文件夹里的未知内容。
