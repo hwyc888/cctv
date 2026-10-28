@@ -2,8 +2,6 @@ package cctv
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -68,7 +66,7 @@ func TestLibraryEpisodesUseOfficialGUIDAndPagination(t *testing.T) {
 				t.Errorf("incorrect column episodes request: %s", req.URL)
 			}
 		case "/NewVideo/getVideoListByAlbumIdNew":
-			if req.URL.Query().Get("id") != "VIDA123456789abc" || req.URL.Query().Get("sort") != "asc" || req.URL.Query().Get("mode") != "1" {
+			if req.URL.Query().Get("id") != "VIDA123456789abc" || req.URL.Query().Get("sort") != "asc" || req.URL.Query().Get("mode") != "2" {
 				t.Errorf("incorrect album episodes request: %s", req.URL)
 			}
 		default:
@@ -170,42 +168,72 @@ func TestLiveCCTVLibraryIntegration(t *testing.T) {
 	}
 }
 
-func TestLiveAnimationEpisodeModes(t *testing.T) {
-	if os.Getenv("CCTV_LIBRARY_INTEGRATION") != "1" {
-		t.Skip("real CCTV API diagnostics only")
+func TestAnimationEpisodeModesFallbackAndNextPage(t *testing.T) {
+	const id = "VIDATdlHRnTKXUY171juqvUA261010"
+	const guid = "eaebe9167ed1461e969c655d0999d48e"
+	client := New()
+	var requestModes []string
+	client.HTTPClient().Transport = mockCCTVTransport(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Query().Get("id") != id {
+			t.Errorf("unexpected album %s", req.URL)
+		}
+		mode := req.URL.Query().Get("mode")
+		requestModes = append(requestModes, mode)
+		if mode == "1" {
+			return libraryMockResponse(`{"data":{"total":26,"list":[{"guid":"`+guid+`","title":"《汤姆猫超能战队1》 第1集","url":"https://tv.cctv.com/2026/10/04/VIDEBVOjJjbLzsoxMiFdMGQW261004.shtml"}]}}`)
+		}
+		return libraryMockResponse(`{"data":{"total":0,"list":[]}}`)
+	})
+	result, err := client.BrowseLibraryEpisodes(context.Background(), "animation", id, 1)
+	if err != nil || result.Total != 26 || result.Page != 1 || len(result.Episodes) != 1 || result.HasMore {
+		t.Fatalf("fallback query lost playable videos: %#v %v", result, err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 160*time.Second)
+	if len(requestModes) != 2 || requestModes[0] != "2" || requestModes[1] != "1" {
+		t.Errorf("CCTV fallback modes wrong: %#v", requestModes)
+	}
+}
+
+func TestAnimationEpisodePagingUsesTotalAndSkipsEmptyFirstPage(t *testing.T) {
+	const guid = "eaebe9167ed1461e969c655d0999d48e"
+	client := New()
+	client.HTTPClient().Transport = mockCCTVTransport(func(req *http.Request) (*http.Response, error) {
+		page := req.URL.Query().Get("p")
+		if page == "2" && req.URL.Query().Get("mode") == "2" {
+			return libraryMockResponse(`{"data":{"total":"250","list":[{"guid":"`+guid+`","title":"《汤姆猫超能战队1》 第101集","url":"https://tv.cctv.com/2026/10/04/VIDEBVOjJjbLzsoxMiFdMGQW261004.shtml"}]}}`)
+		}
+		return libraryMockResponse(`{"data":{"total":0,"list":[]}}`)
+	})
+	result, err := client.BrowseLibraryEpisodes(context.Background(), "animation", "VIDA123456789abc", 1)
+	if err != nil || result.Page != 2 || result.Total != 250 || !result.HasMore || len(result.Episodes) != 1 || result.Episodes[0].Number != 101 {
+		t.Fatalf("empty first page should discover valid second page: %#v %v", result, err)
+	}
+}
+
+func TestLiveAnimationCatalogEpisodes(t *testing.T) {
+	if os.Getenv("CCTV_LIBRARY_INTEGRATION") != "1" {
+		t.Skip("real CCTV metadata integration only")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 	client := New()
-	page, err := client.BrowseLibrary(ctx, "animation", "", 1)
+	programs, err := client.BrowseLibrary(ctx, "animation", "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for index, program := range page.Programs {
-		if index >= 9 {
-			break
+	if len(programs.Programs) < 8 {
+		t.Fatalf("CCTV program catalog unexpectedly short: %d", len(programs.Programs))
+	}
+	for _, program := range programs.Programs[:8] {
+		episodes, err := client.BrowseLibraryEpisodes(ctx, program.Kind, program.ID, 1)
+		if err != nil {
+			t.Fatalf("open %s: %v", program.Title, err)
 		}
-		t.Logf("CARD index=%d id=%s title=%q url=%q", index, program.ID, program.Title, program.SourceURL)
-		for _, mode := range []string{"0", "1", "2"} {
-			rawURL := fmt.Sprintf("https://api.cntv.cn/NewVideo/getVideoListByAlbumIdNew?id=%s&serviceId=tvcctv&p=1&n=100&mode=%s&pub=1&sort=asc", program.ID, mode)
-			body, fetchErr := client.fetch(ctx, rawURL)
-			if fetchErr != nil {
-				t.Logf("EP mode=%s error=%v", mode, fetchErr)
-				continue
-			}
-			var data struct {
-				ErrCode any `json:"errcode"`
-				Msg any `json:"msg"`
-				Data struct {
-					Total any `json:"total"`
-					List []map[string]any `json:"list"`
-				} `json:"data"`
-			}
-			parseErr := json.Unmarshal(body, &data)
-			t.Logf("EP mode=%s items=%d total=%v errcode=%v parseErr=%v rawStart=%q", mode, len(data.Data.List), data.Data.Total, data.ErrCode, parseErr, string(body[:min(len(body),200)]))
-			if len(data.Data.List) > 0 {
-				t.Logf("EP item0=%v", data.Data.List[0])
-			}
+		t.Logf("live program=%q episodes=%d total=%d page=%d hasMore=%v", program.Title, len(episodes.Episodes), episodes.Total, episodes.Page, episodes.HasMore)
+		if len(episodes.Episodes) == 0 || episodes.Total < len(episodes.Episodes) {
+			t.Fatalf("CCTV website shows playable video, but program card is empty: %s", program.Title)
+		}
+		if !libraryGUIDRE.MatchString(episodes.Episodes[0].VideoGUID) {
+			t.Fatalf("missing playable GUID in %s", program.Title)
 		}
 	}
 }
