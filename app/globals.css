@@ -311,7 +311,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 
 /* Subscription episode management: visible entry point and a real table dialog. */
 .subscription-card {
-  grid-template-columns: 76px minmax(0, 1.55fr) minmax(145px, .65fr) minmax(252px, auto);
+  grid-template-columns: 76px minmax(0, 1.55fr) minmax(145px, .65fr) minmax(270px, auto);
 }
 .subscription-info[role="button"] { border-radius: 8px; outline-offset: 4px; }
 .subscription-info[role="button"]:hover .subscription-title h3 { color: var(--accent-dark); }
