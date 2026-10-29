@@ -39,6 +39,7 @@ type Subscription struct {
 	AddedAt           string `json:"addedAt"`
 	LastCheckedAt     string `json:"lastCheckedAt,omitempty"`
 	LastError         string `json:"lastError,omitempty"`
+	ArchiveScanned    bool   `json:"archiveScanned,omitempty"`
 }
 
 type Episode struct {
