@@ -201,7 +201,7 @@ func (m *Manager) AddSubscription(ctx context.Context, rawURL, storageCategoryID
 	sub := model.Subscription{
 		ID: newID("sub"), StorageCategoryID: storageCategoryID, Title: series.Title, SourceURL: series.SourceURL, Poster: series.Poster,
 		Year: series.Year, Category: series.Category, Region: series.Region, Description: series.Description,
-		Status: "active", AutoDownload: true, EpisodeCount: len(series.Episodes), AddedAt: now, LastCheckedAt: now,
+		Status: "active", AutoDownload: true, EpisodeCount: len(series.Episodes), AddedAt: now, LastCheckedAt: now, ArchiveScanned: true,
 	}
 	err = m.store.Update(func(state *model.State) error {
 		if !categoryExists(state.Categories, storageCategoryID) {
@@ -417,7 +417,15 @@ func (m *Manager) CheckSubscription(ctx context.Context, id string) error {
 	if current.ID == "" {
 		return errors.New("订阅不存在")
 	}
-	series, err := m.cctv.ResolveSeries(ctx, current.SourceURL)
+	var series model.Series
+	var err error
+	if current.ArchiveScanned {
+		series, err = m.cctv.ResolveRecentSeries(ctx, current.SourceURL)
+	} else {
+		// One-time backfill for subscriptions created before the full column
+		// archive parser existed. Do not mark it complete unless the scan succeeds.
+		series, err = m.cctv.ResolveSeries(ctx, current.SourceURL)
+	}
 	if err != nil {
 		_ = m.store.Update(func(state *model.State) error {
 			for i := range state.Subscriptions {
@@ -434,9 +442,15 @@ func (m *Manager) CheckSubscription(ctx context.Context, id string) error {
 	now := time.Now().Format(time.RFC3339)
 	err = m.store.Update(func(state *model.State) error {
 		existingURLs := map[string]bool{}
+		existingGUIDs := map[string]bool{}
 		for _, episode := range state.Episodes {
 			if episode.SubscriptionID == id {
-				existingURLs[episode.PageURL] = true
+				if episode.PageURL != "" {
+					existingURLs[episode.PageURL] = true
+				}
+				if episode.VideoGUID != "" {
+					existingGUIDs[strings.ToLower(episode.VideoGUID)] = true
+				}
 			}
 		}
 		var sub *model.Subscription
@@ -452,14 +466,22 @@ func (m *Manager) CheckSubscription(ctx context.Context, id string) error {
 		sub.Title, sub.Poster, sub.Description = series.Title, series.Poster, series.Description
 		sub.Year, sub.Category, sub.Region = series.Year, series.Category, series.Region
 		sub.LastCheckedAt, sub.LastError = now, ""
+		sub.ArchiveScanned = true
 		newTasks := make([]model.DownloadTask, 0)
 		for _, episode := range series.Episodes {
-			if existingURLs[episode.PageURL] {
+			guid := strings.ToLower(episode.VideoGUID)
+			if (episode.PageURL != "" && existingURLs[episode.PageURL]) || (guid != "" && existingGUIDs[guid]) {
 				continue
 			}
 			episode.SubscriptionID = id
 			episode.ID = episodeID(id, episode.PageURL)
 			state.Episodes = append(state.Episodes, episode)
+			if episode.PageURL != "" {
+				existingURLs[episode.PageURL] = true
+			}
+			if guid != "" {
+				existingGUIDs[guid] = true
+			}
 			if sub.AutoDownload && sub.Status == "active" {
 				task := newTask(*sub, episode, now)
 				if state.Settings.DownloadsPaused {
