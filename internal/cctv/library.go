@@ -126,7 +126,33 @@ func (c *Client) BrowseLibrary(ctx context.Context, kind, channel string, page i
 			query.Set("bigday", "")
 		}
 	}
-	body, err := c.fetch(ctx, endpoint+"?"+query.Encode())
+	requestURL := endpoint + "?" + query.Encode()
+	body, err := c.fetch(ctx, requestURL)
+	if err != nil && kind != "columns" && (strings.Contains(strings.ToLower(err.Error()), "redirect") || strings.Contains(strings.ToLower(err.Error()), "redirects")) {
+		// CCTV sometimes loops redirects when optional empty query parameters are
+		// present. Retry the same official endpoint with only meaningful filters,
+		// matching the compact URL shape used by other working CCTV clients.
+		fallbackQuery := query.Clone()
+		for key, values := range fallbackQuery {
+			nonEmpty := false
+			for _, value := range values {
+				if strings.TrimSpace(value) != "" {
+					nonEmpty = true
+					break
+				}
+			}
+			if !nonEmpty {
+				fallbackQuery.Del(key)
+			}
+		}
+		fallbackURL := endpoint + "?" + fallbackQuery.Encode()
+		if fallbackURL != requestURL {
+			body, err = c.fetch(ctx, fallbackURL)
+			if err != nil {
+				return result, fmt.Errorf("读取央视节目目录失败；标准请求重定向异常，精简参数重试也失败: %w", err)
+			}
+		}
+	}
 	if err != nil {
 		return result, fmt.Errorf("读取央视节目目录: %w", err)
 	}
