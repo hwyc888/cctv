@@ -109,6 +109,10 @@ func (c *Client) Search(ctx context.Context, query string) ([]model.SearchResult
 // A direct single-episode link must only preview that episode, even if
 // the playback page embeds suggestions for other episodes.
 func (c *Client) ResolveLink(ctx context.Context, rawURL string) (model.Series, error) {
+	return c.resolveLink(ctx, rawURL, true)
+}
+
+func (c *Client) resolveLink(ctx context.Context, rawURL string, includeColumnArchive bool) (model.Series, error) {
 	normalized, err := normalizeCCTVURL(rawURL)
 	if err != nil {
 		return model.Series{}, err
@@ -117,7 +121,7 @@ func (c *Client) ResolveLink(ctx context.Context, rawURL string) (model.Series, 
 	if err != nil {
 		return model.Series{}, fmt.Errorf("读取央视页面: %w", err)
 	}
-	if columnSeries, handled, columnErr := c.resolveColumnPage(ctx, normalized, body); handled {
+	if columnSeries, handled, columnErr := c.resolveColumnPage(ctx, normalized, body, includeColumnArchive); handled {
 		if columnErr == nil {
 			return columnSeries, nil
 		}
@@ -196,7 +200,9 @@ func (c *Client) ResolveLink(ctx context.Context, rawURL string) (model.Series, 
 }
 
 func (c *Client) ResolveSeries(ctx context.Context, rawURL string) (model.Series, error) {
-	series, err := c.ResolveLink(ctx, rawURL)
+	// Subscriptions only need the recent archive window to discover new items;
+	// manual link browsing uses ResolveLink and can scan the full archive.
+	series, err := c.resolveLink(ctx, rawURL, false)
 	if err != nil {
 		return model.Series{}, err
 	}
