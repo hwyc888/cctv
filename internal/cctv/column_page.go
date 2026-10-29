@@ -306,20 +306,26 @@ func resolveColumnVideoURL(baseURL, raw string) string {
 }
 
 func mergeColumnEpisodes(primary, fallback []model.Episode, poster string) []model.Episode {
-	seen := make(map[string]struct{}, len(primary)+len(fallback))
+	seenGUIDs := make(map[string]struct{}, len(primary)+len(fallback))
+	seenURLs := make(map[string]struct{}, len(primary)+len(fallback))
 	merged := make([]model.Episode, 0, len(primary)+len(fallback))
 	for _, episode := range append(append([]model.Episode(nil), primary...), fallback...) {
-		key := strings.ToLower(strings.TrimSpace(episode.VideoGUID))
-		if key == "" {
-			key = strings.ToLower(strings.TrimSpace(episode.PageURL))
-		}
-		if key == "" {
+		guid := strings.ToLower(strings.TrimSpace(episode.VideoGUID))
+		pageURL := strings.ToLower(strings.TrimSpace(episode.PageURL))
+		if guid == "" && pageURL == "" {
 			continue
 		}
-		if _, exists := seen[key]; exists {
+		_, guidSeen := seenGUIDs[guid]
+		_, urlSeen := seenURLs[pageURL]
+		if (guid != "" && guidSeen) || (pageURL != "" && urlSeen) {
 			continue
 		}
-		seen[key] = struct{}{}
+		if guid != "" {
+			seenGUIDs[guid] = struct{}{}
+		}
+		if pageURL != "" {
+			seenURLs[pageURL] = struct{}{}
+		}
 		if episode.Image == "" {
 			episode.Image = poster
 		}
