@@ -117,6 +117,18 @@ func (c *Client) ResolveLink(ctx context.Context, rawURL string) (model.Series, 
 	if err != nil {
 		return model.Series{}, fmt.Errorf("读取央视页面: %w", err)
 	}
+	if columnSeries, handled, columnErr := c.resolveColumnPage(ctx, normalized, body); handled {
+		if columnErr == nil {
+			return columnSeries, nil
+		}
+		// Retain the existing parser as a fallback for older /lm/ templates
+		// whose episode list is embedded directly in the HTML.
+		legacySeries := parseSeries(string(body), normalized)
+		if len(legacySeries.Episodes) > 0 {
+			return legacySeries, nil
+		}
+		return model.Series{}, columnErr
+	}
 	if u, err := url.Parse(normalized); err == nil && episodePageRE.MatchString(u.Path) {
 		if len(guidRE.FindSubmatch(body)) != 2 {
 			return model.Series{}, errors.New("单集页面没有可用的视频标识，请检查 CCTV 链接")
