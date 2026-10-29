@@ -506,7 +506,7 @@ export default function Home() {
         try {
           await api(`/api/subscriptions/${encodeURIComponent(sub.id)}/check`, { method: "POST" });
           notify(!sub.archiveScanned
-            ? "正在补齐历史集数；扫描完成后列表会自动刷新，不会重复添加已存在的集数"
+            ? "正在补齐历史集数；历史集只加入管理列表，不会自动排队下载。扫描完成后列表会自动刷新"
             : "尚未读取到集数，已自动检查央视目录；列表会自动刷新");
         } catch {
           notify("暂时没有集数记录，请点击“检查新集”重试", "error");
