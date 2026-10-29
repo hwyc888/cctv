@@ -104,6 +104,7 @@ type Subscription = SearchResult & {
   downloadedCount: number;
   lastCheckedAt?: string;
   lastError?: string;
+  archiveScanned?: boolean;
 };
 type StorageCategory = {
   id: string;
@@ -499,12 +500,14 @@ export default function Home() {
     try {
       const result = await api<SubscriptionEpisodeResult>(`/api/subscriptions/${encodeURIComponent(sub.id)}/episodes`);
       setManagedEpisodes(result.episodes);
-      if (result.episodes.length === 0) {
-        // Older subscriptions may not have a persisted episode catalog yet. Start a
-        // fresh CCTV check so the table can populate itself while the dialog is open.
+      if (result.episodes.length === 0 || !sub.archiveScanned) {
+        // Existing subscriptions created before archive-aware parsing are
+        // automatically backfilled once when the management dialog is opened.
         try {
           await api(`/api/subscriptions/${encodeURIComponent(sub.id)}/check`, { method: "POST" });
-          notify("尚未读取到集数，已自动检查央视目录；列表会自动刷新");
+          notify(!sub.archiveScanned
+            ? "正在补齐历史集数；扫描完成后列表会自动刷新，不会重复添加已存在的集数"
+            : "尚未读取到集数，已自动检查央视目录；列表会自动刷新");
         } catch {
           notify("暂时没有集数记录，请点击“检查新集”重试", "error");
         }
