@@ -245,3 +245,50 @@ func TestLiveAnimationCatalogEpisodes(t *testing.T) {
 		}
 	}
 }
+
+
+type redirectFallbackTransport func(*http.Request) (*http.Response, error)
+
+func (f redirectFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestLibraryBrowseRetriesCompactQueryAfterRedirectLoop(t *testing.T) {
+	client := New()
+	redirectCount := 0
+	fallbackCount := 0
+	client.HTTPClient().Transport = redirectFallbackTransport(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "api.cntv.cn" || req.URL.Path != "/list/getVideoAlbumList" {
+			t.Errorf("unexpected request: %s", req.URL)
+			return libraryMockResponse("{}")
+		}
+		if req.Header.Get("Origin") != "https://tv.cctv.com" || req.Header.Get("Sec-Fetch-Site") != "same-site" {
+			t.Errorf("CNTV request missing browser origin headers: %#v", req.Header)
+		}
+		query := req.URL.Query()
+		if query.Has("channel") || query.Has("year") || query.Has("area") || query.Has("sc") || query.Has("letter") {
+			redirectCount++
+			return &http.Response{
+				StatusCode: http.StatusFound,
+				Header: http.Header{"Location": []string{req.URL.String()}},
+				Body: io.NopCloser(strings.NewReader("")),
+				Request: req,
+			}, nil
+		}
+		fallbackCount++
+		if query.Get("channelid") != "CHAL1460955899450127" || query.Get("fc") != "动画片" || query.Get("p") != "1" {
+			t.Errorf("compact retry lost required parameters: %s", req.URL)
+		}
+		return libraryMockResponse(`{"data":{"list":[{"id":"VIDA123456789abc","title":"动画测试","url":"https://tv.cctv.com/album/VIDA.shtml","image":"//img.cctv.com/poster.jpg","brief":"简介"}]}}`)
+	})
+	result, err := client.BrowseLibrary(context.Background(), "animation", "", 1)
+	if err != nil {
+		t.Fatalf("compact retry should recover from redirect loop: %v", err)
+	}
+	if len(result.Programs) != 1 || result.Programs[0].Title != "动画测试" {
+		t.Fatalf("unexpected recovered catalog: %#v", result)
+	}
+	if redirectCount < 2 || fallbackCount != 1 {
+		t.Fatalf("expected redirect loop then one compact retry, redirects=%d fallback=%d", redirectCount, fallbackCount)
+	}
+}
