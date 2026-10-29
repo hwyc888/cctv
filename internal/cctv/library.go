@@ -132,7 +132,10 @@ func (c *Client) BrowseLibrary(ctx context.Context, kind, channel string, page i
 		// CCTV sometimes loops redirects when optional empty query parameters are
 		// present. Retry the same official endpoint with only meaningful filters,
 		// matching the compact URL shape used by other working CCTV clients.
-		fallbackQuery := query.Clone()
+		fallbackQuery := make(url.Values, len(query))
+		for key, values := range query {
+			fallbackQuery[key] = append([]string(nil), values...)
+		}
 		for key, values := range fallbackQuery {
 			nonEmpty := false
 			for _, value := range values {
