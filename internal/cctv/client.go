@@ -292,6 +292,15 @@ func (c *Client) fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	req.Header.Set("Accept", "text/html,application/json,application/xhtml+xml,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
 	req.Header.Set("Referer", "https://tv.cctv.com/")
+	if strings.EqualFold(req.URL.Hostname(), "api.cntv.cn") {
+		// The CNTV API is same-site to CCTV's web client. These headers also
+		// help distinguish a normal JSON API request from a generic crawler.
+		req.Header.Set("Origin", "https://tv.cctv.com")
+		req.Header.Set("Sec-Fetch-Dest", "empty")
+		req.Header.Set("Sec-Fetch-Mode", "cors")
+		req.Header.Set("Sec-Fetch-Site", "same-site")
+		req.Header.Set("Accept", "application/json, text/plain, */*")
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
