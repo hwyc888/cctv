@@ -29,7 +29,7 @@ var (
 // resolveColumnPage recognizes CCTV's /lm/<slug>/ pages, which are column
 // archives rather than ordinary series pages. It discovers the TOPC identifier
 // from page data (or the sibling videoset page) and reads the official API.
-func (c *Client) resolveColumnPage(ctx context.Context, pageURL string, body []byte) (model.Series, bool, error) {
+func (c *Client) resolveColumnPage(ctx context.Context, pageURL string, body []byte, includeArchive bool) (model.Series, bool, error) {
 	u, err := url.Parse(pageURL)
 	if err != nil {
 		return model.Series{}, false, nil
@@ -62,7 +62,7 @@ func (c *Client) resolveColumnPage(ctx context.Context, pageURL string, body []b
 	var apiEpisodes []model.Episode
 	var apiErr error
 	if columnID != "" {
-		apiEpisodes, apiErr = c.fetchCCTVColumnEpisodes(ctx, columnID, pageURL)
+		apiEpisodes, apiErr = c.fetchCCTVColumnEpisodes(ctx, columnID, pageURL, includeArchive)
 	}
 	episodes := mergeColumnEpisodes(apiEpisodes, staticEpisodes, series.Poster)
 	if len(episodes) == 0 {
@@ -164,22 +164,34 @@ func parseColumnPageAnchors(source, baseURL string) []model.Episode {
 	return episodes
 }
 
-func (c *Client) fetchCCTVColumnEpisodes(ctx context.Context, columnID, pageURL string) ([]model.Episode, error) {
+func (c *Client) fetchCCTVColumnEpisodes(ctx context.Context, columnID, pageURL string, includeArchive bool) ([]model.Episode, error) {
 	if !libraryColumnRE.MatchString(columnID) {
 		return nil, errors.New("栏目 ID 不是有效的 TOPC 标识")
 	}
 	now := time.Now()
-	// Search the latest 24 months first. If the column is an older archive,
-	// continue in 12-month windows rather than issuing requests for every year.
+	var collected []model.Episode
+	// Manual URL browsing scans up to ten years of monthly archives. Automatic
+	// subscription checks stop at the first non-empty window, avoiding repeated
+	// historical API traffic while still finding older programmes with no recent
+	// releases.
 	for offset, windowSize := 0, 24; offset < 120; {
 		episodes, errorsSeen := c.fetchCCTVColumnWindow(ctx, columnID, pageURL, now, offset, windowSize)
 		if len(episodes) > 0 {
-			return episodes, nil
+			if !includeArchive {
+				return episodes, nil
+			}
+			collected = append(collected, episodes...)
 		}
 		if ctx.Err() != nil {
+			if len(collected) > 0 {
+				return mergeColumnEpisodes(collected, nil, ""), nil
+			}
 			return nil, ctx.Err()
 		}
 		if len(errorsSeen) > 0 {
+			if len(collected) > 0 {
+				return mergeColumnEpisodes(collected, nil, ""), nil
+			}
 			return nil, errorsSeen[0]
 		}
 		offset += windowSize
@@ -188,7 +200,7 @@ func (c *Client) fetchCCTVColumnEpisodes(ctx context.Context, columnID, pageURL 
 			windowSize = 120 - offset
 		}
 	}
-	return nil, nil
+	return mergeColumnEpisodes(collected, nil, ""), nil
 }
 
 func (c *Client) fetchCCTVColumnWindow(ctx context.Context, columnID, pageURL string, now time.Time, offset, count int) ([]model.Episode, []error) {
