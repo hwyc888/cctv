@@ -170,6 +170,7 @@ func (c *Client) fetchCCTVColumnEpisodes(ctx context.Context, columnID, pageURL 
 	}
 	now := time.Now()
 	var collected []model.Episode
+	var lastErr error
 	// Manual URL browsing scans up to ten years of monthly archives. Automatic
 	// subscription checks stop at the first non-empty window, avoiding repeated
 	// historical API traffic while still finding older programmes with no recent
@@ -189,10 +190,13 @@ func (c *Client) fetchCCTVColumnEpisodes(ctx context.Context, columnID, pageURL 
 			return nil, ctx.Err()
 		}
 		if len(errorsSeen) > 0 {
-			if len(collected) > 0 {
-				return mergeColumnEpisodes(collected, nil, ""), nil
+			lastErr = errorsSeen[0]
+			if !includeArchive {
+				if len(collected) > 0 {
+					return mergeColumnEpisodes(collected, nil, ""), nil
+				}
+				return nil, lastErr
 			}
-			return nil, errorsSeen[0]
 		}
 		offset += windowSize
 		windowSize = 12
@@ -200,7 +204,10 @@ func (c *Client) fetchCCTVColumnEpisodes(ctx context.Context, columnID, pageURL 
 			windowSize = 120 - offset
 		}
 	}
-	return mergeColumnEpisodes(collected, nil, ""), nil
+	if len(collected) > 0 {
+		return mergeColumnEpisodes(collected, nil, ""), nil
+	}
+	return nil, lastErr
 }
 
 func (c *Client) fetchCCTVColumnWindow(ctx context.Context, columnID, pageURL string, now time.Time, offset, count int) ([]model.Episode, []error) {
@@ -296,9 +303,6 @@ func (c *Client) fetchCCTVColumnMonth(ctx context.Context, columnID, pageURL, mo
 				Title: cleanText(item.Title), PageURL: videoURL, VideoGUID: item.GUID,
 				Image: absoluteURL(item.Image), Description: cleanText(item.Brief), PublishedAt: published,
 			})
-		}
-		if len(payload.Data.List) < pageSize {
-			break
 		}
 	}
 	return episodes, nil
