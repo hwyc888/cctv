@@ -250,7 +250,6 @@ export default function Home() {
   const [managedEpisodesBusy, setManagedEpisodesBusy] = useState(false);
   const [managedEpisodeFilter, setManagedEpisodeFilter] = useState("all");
   const [selectedManagedEpisodeIDs, setSelectedManagedEpisodeIDs] = useState<string[]>([]);
-  const [playingTask, setPlayingTask] = useState<DownloadTask | null>(null);
   const [openingDirectoryID, setOpeningDirectoryID] = useState<string | null>(null);
   const settingsInitialized = useRef(false);
   const managedEpisodePollBusy = useRef(false);
@@ -609,7 +608,7 @@ export default function Home() {
   async function manageEpisodeAction(episode: SubscriptionEpisodeRow, action: "retry" | "cancel" | "open" | "play") {
     if (!episode.taskId) return;
     const task = state.downloads.find((item) => item.id === episode.taskId);
-    if (action === "play" && task) { setPlayingTask(task); return; }
+    if (action === "play" && task) { playDownloadedVideo(task); return; }
     if (action === "open" && task) { await openDownloadDirectory(task); return; }
     if (action === "retry" && episode.status === "completed" && !window.confirm(`重新下载《${episode.title}》吗？原视频会在新视频验证成功后才替换。`)) return;
     setManagedEpisodesBusy(true);
@@ -689,7 +688,6 @@ export default function Home() {
       );
       notify(`已删除 ${result.deleted} 条任务、${result.filesDeleted} 个 MP4 文件，清理 ${result.directoriesDeleted ?? 0} 个空目录`);
       setSelectedTaskIDs((current) => current.filter((id) => !ids.includes(id)));
-      if (playingTask && ids.includes(playingTask.id)) setPlayingTask(null);
       await loadState(true);
     } catch (error) {
       notify(error instanceof Error ? error.message : "删除未完成，请检查报错并刷新任务列表", "error");
@@ -708,6 +706,19 @@ export default function Home() {
       await loadState(true);
     } catch (error) { notify(error instanceof Error ? error.message : "操作失败", "error"); }
     finally { setBulkBusy(false); }
+  }
+
+  function playDownloadedVideo(task: DownloadTask) {
+    // Navigate the browser to the MP4 streaming endpoint. The server responds
+    // with video/mp4 and Content-Disposition: inline, so the browser's built-in
+    // media player handles playback; no OS player or shell command is invoked.
+    const videoURL = `${API_BASE}/api/downloads/${encodeURIComponent(task.id)}/video`;
+    const playerWindow = window.open(videoURL, "_blank");
+    if (!playerWindow) {
+      notify("浏览器阻止了播放新标签页，请允许此网站打开新标签页后重试。", "error");
+      return;
+    }
+    try { playerWindow.opener = null; } catch { /* Cross-origin browsers may restrict opener access. */ }
   }
 
   async function openDownloadDirectory(task: DownloadTask) {
@@ -932,7 +943,7 @@ export default function Home() {
           {visibleTasks.length ? <div className="task-list">{visibleTasks.map((task) => <article className={`task-row ${selectedTaskIDs.includes(task.id) ? "selected-for-delete" : ""}`} key={task.id}><label className="task-select-box" title={task.status === "downloading" ? "请先取消下载，等待停止后再选择删除" : "选择此任务以批量删除"}><input type="checkbox" aria-label={`选择删除 ${task.title}`} checked={selectedTaskIDs.includes(task.id)} disabled={task.status === "downloading" || deletingTaskIDs.length > 0} onChange={() => toggleTaskSelection(task.id)} /></label><div className="task-thumb"><img src={task.poster} alt="" />{task.status === "completed" && <span><Check size={14} /></span>}</div><div className="task-main"><div className="task-heading"><div><h3>{task.title}</h3><p>{task.seriesTitle}</p></div><span className={`task-status ${task.status}`}>{task.status === "downloading" && <LoaderCircle className="spin" size={13} />}{statusText(task.status)}</span></div>
             {(task.status === "downloading" || task.status === "queued" || task.status === "paused") && <div className="task-progress"><div className="progress-track"><span style={{ width: `${task.progress}%` }} /></div><div><b>{task.status === "queued" ? "等待可用下载槽" : task.status === "paused" ? "已暂停，恢复后重新开始" : `${Math.round(task.progress)}%`}</b><span>{task.speed || (task.status === "queued" || task.status === "paused" ? "" : "正在连接资源…")}</span></div></div>}
             {task.status === "failed" && <div className="task-error">{task.error}</div>}{task.status === "completed" && <div className="task-file"><FolderOpen size={14} /><span title={task.filePath}>{task.filePath}</span>{task.videoQuality && <b title="实际保存的视频画质"> · {task.videoQuality}</b>}</div>}
-          </div><div className="task-actions">{task.status === "completed" && task.filePath && <><button className="retry" title="重新下载并修复之前损坏的视频" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重新下载</button><button className="open-folder" title="在运行程序的电脑上打开保存目录" disabled={openingDirectoryID === task.id} onClick={() => openDownloadDirectory(task)}>{openingDirectoryID === task.id ? <LoaderCircle className="spin" size={15} /> : <FolderOpen size={15} />}打开目录</button><button className="play-video" title="在线播放已下载视频" onClick={() => setPlayingTask(task)}><Play size={15} />播放</button></>}{(task.status === "queued" || task.status === "downloading" || task.status === "paused") && <button title="取消任务" onClick={() => taskAction(task, "cancel")}><X size={17} /></button>}{(task.status === "failed" || task.status === "cancelled") && <button className="retry" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重试</button>}<button className="task-delete" title={task.status === "downloading" ? "请先取消并停止下载" : "永久删除下载记录及本地视频文件"} disabled={task.status === "downloading" || deletingTaskIDs.length > 0} onClick={() => deleteDownloads([task.id])}>{deletingTaskIDs.includes(task.id) ? <LoaderCircle size={15} className="spin" /> : <Trash2 size={15} />}删除</button></div></article>)}</div> : <div className="empty-state large"><HardDriveDownload size={32} /><h3>这里暂时没有任务</h3><p>去“选集下载”粘贴链接并勾选集数，或订阅节目自动下载。</p></div>}
+          </div><div className="task-actions">{task.status === "completed" && task.filePath && <><button className="retry" title="重新下载并修复之前损坏的视频" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重新下载</button><button className="open-folder" title="在运行程序的电脑上打开保存目录" disabled={openingDirectoryID === task.id} onClick={() => openDownloadDirectory(task)}>{openingDirectoryID === task.id ? <LoaderCircle className="spin" size={15} /> : <FolderOpen size={15} />}打开目录</button><button className="play-video" title="在浏览器新标签页播放，不调用系统播放器" onClick={() => playDownloadedVideo(task)}><Play size={15} />网页播放</button></>}{(task.status === "queued" || task.status === "downloading" || task.status === "paused") && <button title="取消任务" onClick={() => taskAction(task, "cancel")}><X size={17} /></button>}{(task.status === "failed" || task.status === "cancelled") && <button className="retry" onClick={() => taskAction(task, "retry")}><RotateCcw size={15} />重试</button>}<button className="task-delete" title={task.status === "downloading" ? "请先取消并停止下载" : "永久删除下载记录及本地视频文件"} disabled={task.status === "downloading" || deletingTaskIDs.length > 0} onClick={() => deleteDownloads([task.id])}>{deletingTaskIDs.includes(task.id) ? <LoaderCircle size={15} className="spin" /> : <Trash2 size={15} />}删除</button></div></article>)}</div> : <div className="empty-state large"><HardDriveDownload size={32} /><h3>这里暂时没有任务</h3><p>去“选集下载”粘贴链接并勾选集数，或订阅节目自动下载。</p></div>}
         </section>}
 
         {tab === "settings" && <section className="page-content settings-grid">
@@ -1029,7 +1040,7 @@ export default function Home() {
         </div>
       </div>}
       {adding && <div className="modal-backdrop"><div className="add-modal" role="dialog" aria-modal="true" aria-labelledby="add-title"><button className="modal-close" onClick={() => setAdding(null)} disabled={addBusy}><X size={18} /></button><img src={adding.poster} alt="" /><div className="modal-copy"><span className="modal-kicker"><BellRing size={14} />新订阅</span><h2 id="add-title">{adding.title}</h2><p>订阅后系统会每 {state.settings.pollIntervalMinutes} 分钟检查一次，新剧集将自动进入下载队列。</p><label className="modal-category">保存分类<select value={selectedCategoryID} onChange={(event) => setSelectedCategoryID(event.target.value)}>{orderedCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select><small>{state.categories.find((category) => category.id === selectedCategoryID)?.downloadPath || "请先在设置中创建分类"}</small></label><div className="check-row"><input id="download-existing" type="checkbox" checked={downloadExisting} onChange={(event) => setDownloadExisting(event.target.checked)} /><label htmlFor="download-existing"><b>同时下载已有剧集</b><small>{adding.episodeCount ? `将加入 ${adding.episodeCount} 个下载任务` : "已有选集会加入下载队列"}</small></label></div><div className="modal-actions"><button className="cancel-button" onClick={() => setAdding(null)} disabled={addBusy}>取消</button><button className="confirm-button" onClick={confirmAdd} disabled={addBusy || !selectedCategoryID}>{addBusy ? <LoaderCircle className="spin" size={17} /> : <BellRing size={17} />}{addBusy ? "正在添加" : "确认订阅"}</button></div></div></div></div>}
-      {playingTask && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPlayingTask(null); }}><div className="video-modal" role="dialog" aria-modal="true" aria-label={`播放 ${playingTask.title}`}><div className="video-modal-header"><div><strong>{playingTask.title}</strong><small>{playingTask.seriesTitle}{playingTask.videoQuality ? ` · ${playingTask.videoQuality}` : ""}</small></div><button type="button" title="关闭播放器" aria-label="关闭播放器" onClick={() => setPlayingTask(null)}><X size={20} /></button></div><video key={playingTask.id} src={`${API_BASE}/api/downloads/${encodeURIComponent(playingTask.id)}/video`} controls autoPlay playsInline preload="metadata" onError={() => notify("播放失败：请检查文件是否存在以及浏览器是否支持该视频编码", "error")} /><p>直接播放本机保存的 MP4，不会重新下载。若没有画面，可尝试在下载页面重新下载该集。</p></div></div>}
+
       {toast && <div className={`toast ${toast.type}`}><span>{toast.type === "ok" ? <CheckCircle2 size={18} /> : <X size={18} />}</span>{toast.text}</div>}
     </div>
   );
