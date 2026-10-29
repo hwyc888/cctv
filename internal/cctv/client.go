@@ -200,8 +200,23 @@ func (c *Client) resolveLink(ctx context.Context, rawURL string, includeColumnAr
 }
 
 func (c *Client) ResolveSeries(ctx context.Context, rawURL string) (model.Series, error) {
-	// Subscriptions only need the recent archive window to discover new items;
-	// manual link browsing uses ResolveLink and can scan the full archive.
+	// The first subscription scan must backfill the complete archive, not just
+	// recent months. Existing subscriptions created by older versions may only
+	// contain a small static HTML list even when CCTV has many more episodes.
+	series, err := c.resolveLink(ctx, rawURL, true)
+	if err != nil {
+		return model.Series{}, err
+	}
+	if series.IsSingle {
+		return model.Series{}, errors.New("自动追更需要剧集主页链接；单集请使用选集下载")
+	}
+	return series, nil
+}
+
+// ResolveRecentSeries is used after a subscription has completed its one-time
+// archive backfill. It checks recent archive windows for newly published items
+// without repeatedly crawling years of history.
+func (c *Client) ResolveRecentSeries(ctx context.Context, rawURL string) (model.Series, error) {
 	series, err := c.resolveLink(ctx, rawURL, false)
 	if err != nil {
 		return model.Series{}, err
