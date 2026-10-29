@@ -417,9 +417,10 @@ func (m *Manager) CheckSubscription(ctx context.Context, id string) error {
 	if current.ID == "" {
 		return errors.New("订阅不存在")
 	}
+	archiveBackfill := !current.ArchiveScanned
 	var series model.Series
 	var err error
-	if current.ArchiveScanned {
+	if !archiveBackfill {
 		series, err = m.cctv.ResolveRecentSeries(ctx, current.SourceURL)
 	} else {
 		// One-time backfill for subscriptions created before the full column
@@ -482,7 +483,11 @@ func (m *Manager) CheckSubscription(ctx context.Context, id string) error {
 			if guid != "" {
 				existingGUIDs[guid] = true
 			}
-			if sub.AutoDownload && sub.Status == "active" {
+			// Historical episodes discovered during a one-time backfill are
+			// added to the management list but are not automatically queued.
+			// Routine future checks still honor the subscription's auto-download
+			// setting for newly released episodes.
+			if !archiveBackfill && sub.AutoDownload && sub.Status == "active" {
 				task := newTask(*sub, episode, now)
 				if state.Settings.DownloadsPaused {
 					task.Status = "paused"
