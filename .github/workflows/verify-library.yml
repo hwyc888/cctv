@@ -6,6 +6,9 @@ on:
     paths:
       - internal/cctv/library.go
       - internal/cctv/library_test.go
+      - internal/cctv/column_page.go
+      - internal/cctv/column_page_test.go
+      - internal/cctv/column_page_live_test.go
       - internal/cctv/client.go
       - internal/cctv/link_test.go
       - internal/cctv/special_links_test.go
@@ -29,4 +32,5 @@ jobs:
       - name: Verify CCTV program and episode browsing against real APIs
         env:
           CCTV_LIBRARY_INTEGRATION: "1"
-        run: go test ./internal/cctv ./internal/server -run '^TestLive(CCTVLibraryIntegration|AnimationCatalogEpisodes|SpecialProgramLinks|SpecialHTTPSelection|AnimationHTTPSelection)$' -count=1 -v -timeout 3m
+        run: go test ./internal/cctv ./internal/server -run '^TestLive(CCTVLibraryIntegration|AnimationCatalogEpisodes|CCTVColumnArchive|SpecialProgramLinks|SpecialHTTPSelection|AnimationHTTPSelection)
+ -count=1 -v -timeout 3m
